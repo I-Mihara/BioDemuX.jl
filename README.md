@@ -1,9 +1,9 @@
-![package_logo](Demux_logo.jpg)
+![package_logo](BioDemuX_logo.png)
 
-[![Build Status](https://github.com/I-Mihara/Demux.jl/actions/workflows/CI.yml/badge.svg?branch=main)](https://github.com/I-Mihara/Demux.jl/actions/workflows/CI.yml?query=branch%3Amain)
+[![Build Status](https://github.com/I-Mihara/BioDemuX.jl/actions/workflows/CI.yml/badge.svg?branch=main)](https://github.com/I-Mihara/BioDemuX.jl/actions/workflows/CI.yml?query=branch%3Amain)
 
 ## Overview
-Demux.jl is a Julia package designed for demultiplexing reads based on barcodes. Given a set of sequencing reads in FASTQ format and a reference barcode in CSV or TSV format, each read is assigned to a FASTQ file corresponding to its barcode. This barcode assignment process is designed to be robust to barcode mutations and allows you to adjust the permitted level of mutation through parameters.
+BioDemuX.jl is a Julia package designed for demultiplexing reads based on barcodes. Given a set of sequencing reads in FASTQ format and a reference barcode in CSV or TSV format, each read is assigned to a FASTQ file corresponding to its barcode. This barcode assignment process is designed to be robust to barcode mutations and allows you to adjust the permitted level of mutation through parameters.
 
 ![conceptual_diagram](conceptual_diagram.png)
 
@@ -37,9 +37,9 @@ To be published.
 ## Installation
 1. Open the Julia REPL (by typing `julia` in the terminal).
 2. Press `]` to enter the Pkg REPL mode.
-3. Run the following command to install `Demux.jl`:
+3. Run the following command to install `BioDemuX.jl`:
     ```julia
-    add Demux
+    add BioDemuX
     ```
 4. Press the `Backspace` key to exit the Pkg mode.
 
@@ -47,7 +47,7 @@ To be published.
 
 The primary function of this package is `execute_demultiplexing()`. It classifies sequences in a FASTQ file by aligning them with reference barcodes in barcode file. Usage is as follows:
 ```Julia
-using Demux
+using BioDemuX
 execute_demultiplexing(FASTQ_file, barcode_file, output_directory)
 ```
 
@@ -80,7 +80,7 @@ ID  Full_seq	Full_annotation
 ## Tips to Speed Up Demultiplexing
 
 ### 1. Parallel Computing
-`Demux.jl` supports parallel computing, allowing faster processing of large datasets. To utilize parallel processing, follow the steps below:
+`BioDemuX.jl` supports parallel computing, allowing faster processing of large datasets. To utilize parallel processing, follow the steps below:
 
 #### Starting Julia with Multiple Threads
 To enable parallel processing, you need to start Julia with multiple threads. Use the `-p` flag followed by the number of desired threads:
@@ -94,14 +94,14 @@ using Distributed
 addprocs(n) # 'n' is the number of desired workers
 ```
 #### Runnning `execute_demutltiplexing` with Parallel Computing
-Once the worker processes are set up. you can perform parallel computing using the `execute_demultiplexing` function. `Demux.jl` automatically divides the files based on the available worker processes for faster computation:
+Once the worker processes are set up. you can perform parallel computing using the `execute_demultiplexing` function. `BioDemuX.jl` automatically divides the files based on the available worker processes for faster computation:
 ```julia
-@everywhere using Demux
+@everywhere using BioDemuX
 execute_demultiplexing(FASTQ_file1, FASTQ_file2, barcode_file, output_directory)
 ```
 
 ### 2. Setting Options
-Demux.jl skips calculation of unnecessary path in DP matrix based on the settings of `max_error_rate`,`mismatch`. and `indel`. By setting lower max error rate or higher penalty, you can further increase computation speed.
+BioDemuX.jl skips calculation of unnecessary path in DP matrix based on the settings of `max_error_rate`,`mismatch`. and `indel`. By setting lower max error rate or higher penalty, you can further increase computation speed.
 
 ## Options
 
@@ -174,10 +174,10 @@ With this settings, the classification works as follows:
    - If the sequence fails to match **any** barcode within the maximum allowed penalty score of 2, it is classified as `unknown.fastq`.
 
 ## How to Run Tests
-To ensure that `Demux.jl` functions correctly, you can run tests using the Julia package's built-in testing functionality. 
+To ensure that `BioDemuX.jl` functions correctly, you can run tests using the Julia package's built-in testing functionality. 
 ```julia
 using Pkg
-Pkg.test("Demux")
+Pkg.test("BioDemuX")
 ```
 
 ## Support or Contanct

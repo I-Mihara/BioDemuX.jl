@@ -1,6 +1,6 @@
 __precompile__()
 
-module Demux
+module BioDemuX
 
 export
 	semiglobal_alignment,

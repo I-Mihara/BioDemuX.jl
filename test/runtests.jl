@@ -1,4 +1,4 @@
-using Demux
+using BioDemuX
 using Test
 using Distributed
 
@@ -61,7 +61,7 @@ end
 end
 
 addprocs(3)
-@everywhere using Demux
+@everywhere using BioDemuX
 @testset "Multi Thread Tests" begin
     @testset "Multi-thread with 1 FASTQ file" begin
         mktempdir() do output_dir
