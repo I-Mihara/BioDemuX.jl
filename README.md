@@ -1,5 +1,4 @@
 ![package_logo](BioDemuX_logo.png)
-
 [![Build Status](https://github.com/I-Mihara/BioDemuX.jl/actions/workflows/CI.yml/badge.svg?branch=main)](https://github.com/I-Mihara/BioDemuX.jl/actions/workflows/CI.yml?query=branch%3Amain)
 
 ## Overview
