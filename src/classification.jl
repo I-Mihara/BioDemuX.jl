@@ -158,7 +158,7 @@ function classify_sequences(FASTQ_file1::String, FASTQ_file2::String, bc_df::Dat
 	end
 end
 
-function classify_sequences(FASTQ_file1::String, bc_df::DataFrame, output_dir::String, output_prefix::String, max_error_rate::Float64, min_delta::Float64, mismatch::Int = 1, indel::Int = 1)
+function classify_sequences(FASTQ_file1::String, bc_df::DataFrame, output_dir::String, output_prefix::String, max_error_rate::Float64, min_delta::Float64, mismatch::Int, indel::Int)
 	open(FASTQ_file1, "r") do file
 		header, seq, plus, quality_score = "", "", "", ""
 		mode = "header"
