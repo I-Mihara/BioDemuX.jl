@@ -62,7 +62,7 @@ execute_demultiplexing(FASTQ_file, barcode_file, output_directory)
 ```julia
 execute_demultiplexing(FASTQ_file1, FASTQ_file2, barcode_file, output_directory)
 ```
-When using two FASTQ files, sequences in the FASTQ_file2 are classified based on the alignment of the FASTQ_file1 sequences with the barcodes in the barcode reference file. Hence, the corresponding reads in both FASTQ files must be in the same order and present in equal numbers.
+When using two FASTQ files, sequences in the `FASTQ_file2` are classified based on the alignment of the `FASTQ_file1` sequences with the barcodes in the barcode reference file. Hence, the corresponding reads in both FASTQ files must be in the same order and present in equal numbers.
 
 #### Barcode Reference File
 * The reference file is expected to be a CSV or TSV file containing the following columns: `ID`, `Full_seq`, `Full_annotation`, as shown below:
@@ -95,8 +95,8 @@ Even after starting the Julia REPL, you can add more worker processes using the 
 using Distributed
 addprocs(n) # 'n' is the number of desired workers
 ```
-#### Runnning `execute_demutltiplexing` with Parallel Computing
-Once the worker processes are set up. you can perform parallel computing using the `execute_demultiplexing` function. `BioDemuX.jl` automatically divides the files based on the available worker processes for faster computation:
+#### Runnning `execute_demultiplexing` with Parallel Computing
+Once the worker processes are set up, you can perform parallel computing using the `execute_demultiplexing` function. `BioDemuX.jl` automatically divides the files based on the available worker processes for faster computation:
 ```julia
 @everywhere using BioDemuX
 execute_demultiplexing(FASTQ_file1, FASTQ_file2, barcode_file, output_directory)
@@ -126,7 +126,7 @@ execute_demultiplexing(FASTQ_file, barcode_file, output_directory, output_prefix
   - The penalty score for insertions and deletions (indels) during sequence alignment. A higher value makes the alignment more strict for insertions or deletions.
 
 - **`classify_both::Bool`** (default: `false`): 
-  - If set to `true`, the function will classify sequences in both ``FASTQ_file1` and `FASTQ_file2` and output separate files for each. Otherwise, it classifies only R2 sequences by default.
+  - If set to `true`, the function will classify sequences in both `FASTQ_file1` and `FASTQ_file2` based on the alignment with sequences in `FASTQ_file1` and output separate files for each. Otherwise, it classifies only R2 sequences by default.
 
 - **`bc_complement::Bool`** (default: `false`): 
   - If set to true, the barcodes in the reference file are converted to their complementary sequences before alignment.
@@ -135,10 +135,10 @@ execute_demultiplexing(FASTQ_file, barcode_file, output_directory, output_prefix
   - If set to true, the barcodes in the reference file are reversed before alignment.
 
 - **`output_prefix1::String`** (default: `""`):
-  - Specifies the prefix for the first set of output files. If not provided, the prefix defaults to the name of the FASTQ file. By setting this option, you can customize the file names for the first set of outputs.
+  - Specifies the prefix for the first set of output files when processing two FASTQ files. If not provided, the prefix defaults to the name of the `FASTQ_file1`. By setting this option, you can customize the file names for the first set of outputs.
 
 - **`output_prefix2::String`** (default: `""`):
-  - Specifies the prefix for the second set of output files. If not provided, the prefix defaults to the name of the FASTQ file. By setting this option, you can customize the file names for the second set of outputs.
+  - Specifies the prefix for the second set of output files when processing two FASTQ files. If not provided, the prefix defaults to the name of the `FASTQ_file2`. By setting this option, you can customize the file names for the second set of outputs.
 
 - **`output_prefix::String`** (default: `""`):
   - Specifies the prefix for the output files when processing a single FASTQ file. If not provided, the prefix defaults to the name of the FASTQ file.
