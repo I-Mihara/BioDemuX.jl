@@ -95,7 +95,7 @@ Even after starting the Julia REPL, you can add more worker processes using the 
 using Distributed
 addprocs(n) # 'n' is the number of desired workers
 ```
-#### Runnning `execute_demultiplexing` with Parallel Computing
+#### Running `execute_demultiplexing` with Parallel Computing
 Once the worker processes are set up, you can perform parallel computing using the `execute_demultiplexing` function. `BioDemuX.jl` automatically divides the files based on the available worker processes for faster computation:
 ```julia
 @everywhere using BioDemuX
