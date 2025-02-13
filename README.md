@@ -1,6 +1,6 @@
 ![package_logo](BioDemuX_logo.png)
 [![Build Status](https://github.com/I-Mihara/BioDemuX.jl/actions/workflows/CI.yml/badge.svg?branch=main)](https://github.com/I-Mihara/BioDemuX.jl/actions/workflows/CI.yml?query=branch%3Amain)
-[![DOI](https://img.shields.io/badge/DOI-10.24433%2FCO.5417078.v1-blue)](https://doi.org/10.24433/CO.5417078.v1)
+[![DOI](https://img.shields.io/badge/DOI-10.24433%2FCO.5417078.v2-blue)](https://doi.org/10.24433/CO.5417078.v2)
 [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.14191427.svg)](https://doi.org/10.5281/zenodo.14191427)
 
 ## Overview
