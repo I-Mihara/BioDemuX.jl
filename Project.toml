@@ -7,11 +7,13 @@ version = "1.1.0"
 CSV = "336ed68f-0bac-5ca0-87d4-7b16caf5d00b"
 DataFrames = "a93c6f00-e57d-5684-b7b6-d8193f3e46c0"
 Distributed = "8ba89e20-285c-5b6f-9357-94700520ee1b"
+CodecZlib = "944b1d66-785c-5afd-91f1-9de20f533193"
 
 [compat]
 julia = "1.10"
 DataFrames = "1.7"
 CSV = "0.10"
+CodecZlib = "0.7"
 
 [extras]
 Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
