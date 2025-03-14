@@ -10,14 +10,15 @@ export
 	classify_sequences,
 
 	preprocess_bc_file,
-	preprocess_fastq,
+	read_fastq,
+	write_fastq,
 	divide_fastq,
 	multi_demultiplex,
 	merge_fastq_files,
 	execute_demultiplexing
 
 
-using DataFrames, CSV, Distributed
+using DataFrames, CSV, Distributed, CodecZlib
 include("classification.jl")
 include("fileio.jl")
 include("core.jl")

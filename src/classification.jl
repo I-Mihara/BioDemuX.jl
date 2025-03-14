@@ -75,20 +75,25 @@ function find_best_matching_bc(seq::String, bc_df::DataFrame, max_error_rate::Fl
 	return min_score_bc, delta
 end
 
-function determine_filename(seq::String, bc_df::DataFrame, max_error_rate::Float64, min_delta::Float64, mismatch::Int, indel::Int)
+function determine_filename(seq::String, bc_df::DataFrame, max_error_rate::Float64, min_delta::Float64, mismatch::Int, indel::Int, gzip_output::Bool)
 	min_score_bc, delta = find_best_matching_bc(seq, bc_df, max_error_rate, mismatch, indel)
-
+	output_filename = ""
 	if min_score_bc == 0
-		return "unknown.fastq"
+		output_filename = "unknown.fastq"
 	elseif delta < min_delta
-		return "ambiguous_classification.fastq"
+		output_filename = "ambiguous_classification.fastq"
 	else
-		return string(bc_df.ID[min_score_bc]) * ".fastq"
+		output_filename = string(bc_df.ID[min_score_bc]) * ".fastq"
+	end
+	if gzip_output
+		return output_filename * ".gz"
+	else
+		return output_filename
 	end
 end
 
 function write_fastq_entry(filepath, header, seq, plus, quality)
-	open(filepath, "a") do outputfile
+	write_fastq(filepath) do outputfile
 		write(outputfile, header * "\n" * seq * "\n" * plus * "\n" * quality * "\n")
 	end
 end
@@ -96,10 +101,10 @@ end
 """
 Compare each sequence in the FASTQ_file1 file with the sequences in bc_df, and classify the sequences of the specified file based on that comparison.
 """
-function classify_sequences(FASTQ_file1::String, FASTQ_file2::String, bc_df::DataFrame, output_dir::String, output_prefix1::String, output_prefix2::String, max_error_rate::Float64, min_delta::Float64, mismatch::Int, indel::Int, classify_both::Bool)
+function classify_sequences(FASTQ_file1::String, FASTQ_file2::String, bc_df::DataFrame, output_dir::String, output_prefix1::String, output_prefix2::String, max_error_rate::Float64, min_delta::Float64, mismatch::Int, indel::Int, classify_both::Bool, gzip_output::Bool)
 	if classify_both
-		open(FASTQ_file1, "r") do primary_file
-			open(FASTQ_file2, "r") do secondary_file
+		read_fastq(FASTQ_file1) do primary_file
+			read_fastq(FASTQ_file2) do secondary_file
 				header, seq, plus, quality_score = "", "", "", ""
 				header2, seq2, plus2, quality_score2 = "", "", "", ""
 				mode = "header"
@@ -121,7 +126,7 @@ function classify_sequences(FASTQ_file1::String, FASTQ_file2::String, bc_df::Dat
 					elseif mode == "quality_score"
 						quality_score = line1
 						quality_score2 = line2
-						filename = determine_filename(seq, bc_df, max_error_rate, min_delta, mismatch, indel)
+						filename = determine_filename(seq, bc_df, max_error_rate, min_delta, mismatch, indel, gzip_output)
 						write_fastq_entry(output_dir * "/" * output_prefix1 * "." * filename, header, seq, plus, quality_score)
 						write_fastq_entry(output_dir * "/" * output_prefix2 * "." * filename, header2, seq2, plus2, quality_score2)
 						mode = "header"
@@ -130,8 +135,8 @@ function classify_sequences(FASTQ_file1::String, FASTQ_file2::String, bc_df::Dat
 			end
 		end
 	else
-		open(FASTQ_file1, "r") do primary_file
-			open(FASTQ_file2, "r") do secondary_file
+		read_fastq(FASTQ_file1) do primary_file
+			read_fastq(FASTQ_file2) do secondary_file
 				header2, seq2, plus2, quality_score2 = "", "", "", ""
 				mode = "header"
 				filename = ""
@@ -141,7 +146,7 @@ function classify_sequences(FASTQ_file1::String, FASTQ_file2::String, bc_df::Dat
 						header2 = line2
 						mode = "seq"
 					elseif mode == "seq"
-						filename = determine_filename(line1, bc_df, max_error_rate, min_delta, mismatch, indel)
+						filename = determine_filename(line1, bc_df, max_error_rate, min_delta, mismatch, indel, gzip_output)
 						seq2 = line2
 						mode = "plus"
 					elseif mode == "plus"
@@ -158,8 +163,8 @@ function classify_sequences(FASTQ_file1::String, FASTQ_file2::String, bc_df::Dat
 	end
 end
 
-function classify_sequences(FASTQ_file1::String, bc_df::DataFrame, output_dir::String, output_prefix::String, max_error_rate::Float64, min_delta::Float64, mismatch::Int, indel::Int)
-	open(FASTQ_file1, "r") do file
+function classify_sequences(FASTQ_file1::String, bc_df::DataFrame, output_dir::String, output_prefix::String, max_error_rate::Float64, min_delta::Float64, mismatch::Int, indel::Int, gzip_output::Bool)
+	read_fastq(FASTQ_file1) do file
 		header, seq, plus, quality_score = "", "", "", ""
 		mode = "header"
 		filename = ""
@@ -175,7 +180,7 @@ function classify_sequences(FASTQ_file1::String, bc_df::DataFrame, output_dir::S
 				mode = "quality_score"
 			elseif mode == "quality_score"
 				quality_score = line
-				filename = determine_filename(seq, bc_df, max_error_rate, min_delta, mismatch, indel)
+				filename = determine_filename(seq, bc_df, max_error_rate, min_delta, mismatch, indel, gzip_output)
 				write_fastq_entry(output_dir * "/" * output_prefix * "." * filename, header, seq, plus, quality_score)
 				mode = "header"
 			end
