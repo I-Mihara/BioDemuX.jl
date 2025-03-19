@@ -32,9 +32,10 @@ To be published.
 
 
 ## Dependencies
-* Julia >= 1.10.5 (includes the `Distributed` standard library)
+* Julia >= 1.10 (includes the `Distributed` standard library)
 * DataFrames >= 1.7.0
 * CSV >= 0.10.14
+* CodecZlib >= 0.7.0
 
 ## Installation
 1. Open the Julia REPL (by typing `julia` in the terminal).
@@ -72,9 +73,12 @@ ID  Full_seq	Full_annotation
 ```
 * In the `Full_seq` column, the region specified as `B` in the `Full_annotation` column is considerd as the barcode.
 
+* Alternatively, a FASTA file of barcode sequences can be used as the reference. In this case, each sequence in the FASTA file is treated as a full barcode (the entire sequence is considered the barcode region) and the header line of each entry (without the `>` prefix) is used as its `ID`.
+
 ### Output
 
 * All output files will be saved in the specified `output_directory`.
+* The output is gzipped depending on the input FASTQ format, or can be specified using the `gzip_output` option.
 * The names of the output files are based on the filename of the FASTQ file as the prefix and the `ID` values in the barcode reference file. For example, if the FASTQ filename is `sample.fastq` and the reference file contains IDs such as `001` and `002`, the resulting output files will be named `sample.001.fastq`, `sample.002.fastq`, and so on. You can freely change the prefix by specifying the `output_prefix` argument.
 * Sequences that do not match any barcode in the reference file are saved in `unknown.fastq`. Sequences that have ambiguous classification (i.e., they match multiple barcodes with similar scores) are saved in `ambiguous_classification.fastq`. These FASTQ files also have prefix like `sample.unknown.fastq` and `sample.ambiguous_classification.fastq`
 * If the `output_directory` does not exist, a new directory is created to store the output files.
@@ -142,6 +146,9 @@ execute_demultiplexing(FASTQ_file, barcode_file, output_directory, output_prefix
 
 - **`output_prefix::String`** (default: `""`):
   - Specifies the prefix for the output files when processing a single FASTQ file. If not provided, the prefix defaults to the name of the FASTQ file.
+
+- **`gzip_output::Bool`** (default: `auto-detect`):
+Controls whether the output FASTQ files are compressed (gzipped). By default (when this option is not explicitly set), the output will be gzipped if the input FASTQ files have a .gz extension, and uncompressed otherwise. You can set gzip_output=true to force gzipped output files or gzip_output=false to ensure output files are not compressed.
 
 ## Example: How Barcode Length and Option Values Affect Classification
 
