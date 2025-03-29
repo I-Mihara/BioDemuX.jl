@@ -32,11 +32,11 @@ To be published.
 
 
 ## Dependencies
-* Julia >= 1.10 (includes the `Distributed` standard library)
-* Julia packages
-** DataFrames >= 1.7.0
-** CSV >= 0.10.14
-** CodecZlib >= 0.7.0
+- **Julia** >= 1.10 (includes the `Distributed` standard library)
+- **Julia packages**
+  - DataFrames >= 1.7.0
+  - CSV >= 0.10.14
+  - CodecZlib >= 0.7.0
 
 ## Installation
 1. Open the Julia REPL (by typing `julia` in the terminal).
