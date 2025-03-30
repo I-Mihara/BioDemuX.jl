@@ -19,6 +19,7 @@ BioDemuX.jl is a Julia package designed for demultiplexing reads based on barcod
 To be published.
 
 ## Table of Contents
+- [Dependencies](#dependencies)
 - [Installation](#installation)
 - [Basic Usage](#basic-usage)
   - [Input](#input)
@@ -199,5 +200,5 @@ Link to the dataset and test code: https://doi.org/10.24433/CO.5417078.v1
 
 Link to the dataset: https://doi.org/10.5281/zenodo.14191427
 
-## Support or Contanct
+## Support or Contact
 If you encounter any issues or have requests, please provide feedback by posting a new GitHub issue on our repository. We appreciate your input and will do our best to assist you!
