@@ -150,7 +150,7 @@ execute_demultiplexing(FASTQ_file, barcode_file, output_directory, output_prefix
   - Specifies the prefix for the output files when processing a single FASTQ file. If not provided, the prefix defaults to the name of the FASTQ file.
 
 - **`gzip_output::Bool`** (default: `auto-detect`):
-Controls whether the output FASTQ files are compressed (gzipped). By default (when this option is not explicitly set), the output will be gzipped if the input FASTQ files have a .gz extension, and uncompressed otherwise. You can set gzip_output=true to force gzipped output files or gzip_output=false to ensure output files are not compressed.
+  - Controls whether the output FASTQ files are compressed (gzipped). By default (when this option is not explicitly set), the output will be gzipped if the input FASTQ files have a `.gz` extension, and uncompressed otherwise. You can set `gzip_output=true` to force gzipped output files or `gzip_output=false` to ensure output files are not compressed.
 
 ## Example: How Barcode Length and Option Values Affect Classification
 
