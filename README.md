@@ -154,7 +154,7 @@ execute_demultiplexing(FASTQ_file, barcode_file, output_directory, output_prefix
 
 ## Example: How Barcode Length and Option Values Affect Classification
 
-We assume the case where Barcode Length is 10, `max_error_rate ` is 0.2, `min_delta` is 0.2, `mismatch` is 1, `indel` is 2.
+We assume the case where barcode length is 10, `max_error_rate ` is 0.2, `min_delta` is 0.2, `mismatch` is 1, `indel` is 2.
 
 
 - **Maximum Allowed Penalty Score**:
