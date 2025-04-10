@@ -83,13 +83,27 @@ function write_fastq(f::Function, filepath::String)
     end
 end
 
+function count_fastq_lines(file::String)
+    total_lines = 0
+    if endswith(lowercase(file), ".gz")
+        open(GzipDecompressorStream, file, "r") do io
+            for _ in eachline(io)
+                total_lines += 1
+            end
+        end
+    else
+        total_lines = countlines(file)
+    end
+    return total_lines
+end
+
 """
 Divides a pair of FASTQ files into smaller parts for parallel processing.
 It calculates the number of reads per worker and uses the split command to divide the files.
 """
 function divide_fastq(FASTQ_file1::String, FASTQ_file2::String, output_dir::String, workers::Int, gzip_output::Bool)
 	divided_dir = mktempdir(output_dir)
-	total_lines = countlines(FASTQ_file1)
+	total_lines = count_fastq_lines(FASTQ_file1)
 	total_reads = total_lines ÷ 4
 	reads_per_worker = cld(total_reads, workers)
 	lines_per_worker = reads_per_worker * 4
@@ -123,7 +137,7 @@ Divides a single FASTQ file for parallel processing.
 """
 function divide_fastq(FASTQ_file::String, output_dir::String, workers::Int, gzip_output::Bool)
 	divided_dir = mktempdir(output_dir)
-	total_lines = countlines(FASTQ_file)
+	total_lines = count_fastq_lines(FASTQ_file)
 	total_reads = total_lines ÷ 4
 	reads_per_worker = cld(total_reads, workers)
 	lines_per_worker = reads_per_worker * 4
