@@ -116,13 +116,13 @@ BioDemuX.jl skips calculation of unnecessary path in DP matrix based on the sett
 The `execute_demultiplexing` function provides several optional parameters to control the demultiplexing process:
 
 ```julia
-execute_demultiplexing(FASTQ_file, barcode_file, output_directory, output_prefix="", max_error_rate=0.2, min_delta=0.1, mismatch=1, indel=1, classify_both=false, bc_complement=false, bc_rev=false)
+execute_demultiplexing(FASTQ_file, barcode_file, output_directory, output_prefix="", max_error_rate=0.2, min_delta=0.0, mismatch=1, indel=1, classify_both=false, bc_complement=false, bc_rev=false)
 ```
 
 - **`max_error_rate::Float64`** (default: `0.2`): 
   - This is the maximum allowed error rate for matching sequences to barcodes. It is multiplied by the barcode's length to calculate the total penalty score that can be tolerated. If the sequence's alignment penalty exceeds this limit for all barcodes, it will be saved in `unknown.fastq`.
 
-- **`min_delta::Float64`** (default: `0.1`): 
+- **`min_delta::Float64`** (default: `0.0`): 
   - This defines the minimum difference in penalty scores needed to confidently assign a sequence to a barcode. It is multiplied by the barcode's length to determine the score difference required to avoid ambiguity. If the difference between the best match's penalty score and the second-best match's score is less than this threshold, the sequence is considered ambiguous and saved in `ambiguous_classification.fastq`.
   
 - **`mismatch::Int`** (default: `1`): 
