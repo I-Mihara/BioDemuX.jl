@@ -11,6 +11,7 @@ DataFrames = "a93c6f00-e57d-5684-b7b6-d8193f3e46c0"
 Distributed = "8ba89e20-285c-5b6f-9357-94700520ee1b"
 
 [compat]
+BufferedStreams = "1.2"
 CSV = "0.10"
 CodecZlib = "0.7"
 DataFrames = "1.7"
