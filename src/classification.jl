@@ -92,10 +92,28 @@ function determine_filename(seq::String, bc_df::DataFrame, max_error_rate::Float
 	end
 end
 
-function write_fastq_entry(filepath, header, seq, plus, quality)
-	write_fastq(filepath) do outputfile
-		write(outputfile, header * "\n" * seq * "\n" * plus * "\n" * quality * "\n")
+const _fastq_ios = Dict{String, IO}()
+
+function get_fastq_io(path::String)
+    get!(_fastq_ios, path) do
+        raw = open(path, "a")
+        io  = endswith(lowercase(path), ".gz") ?
+              GzipCompressorStream(raw) : raw
+        return BufferedOutputStream(io)
+    end
+end
+
+function close_all_fastq_ios()
+	for io in values(_fastq_ios)
+		flush(io)
+		close(io)
 	end
+	empty!(_fastq_ios)
+end
+
+function write_fastq_entry(filepath, header, seq, plus, quality)
+	io=get_fastq_io(filepath)
+	write(io, header * "\n" * seq * "\n" * plus * "\n" * quality * "\n")
 end
 
 """
@@ -161,6 +179,7 @@ function classify_sequences(FASTQ_file1::String, FASTQ_file2::String, bc_df::Dat
 			end
 		end
 	end
+	close_all_fastq_ios()
 end
 
 function classify_sequences(FASTQ_file1::String, bc_df::DataFrame, output_dir::String, output_prefix::String, max_error_rate::Float64, min_delta::Float64, mismatch::Int, indel::Int, gzip_output::Bool)
@@ -186,4 +205,5 @@ function classify_sequences(FASTQ_file1::String, bc_df::DataFrame, output_dir::S
 			end
 		end
 	end
+	close_all_fastq_ios()
 end
