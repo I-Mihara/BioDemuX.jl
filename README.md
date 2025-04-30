@@ -38,6 +38,7 @@ To be published.
   - DataFrames >= 1.7.0
   - CSV >= 0.10.14
   - CodecZlib >= 0.7.0
+  - BufferedStreams >= 1.2.2
 
 ## Installation
 1. Open the Julia REPL (by typing `julia` in the terminal).
