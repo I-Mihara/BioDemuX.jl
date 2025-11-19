@@ -79,14 +79,17 @@ function find_best_matching_bc(seq::String, bc_seqs::Vector{String}, ws::SemiGlo
 				max_error_rate = min(max_error_rate, min_score)
 			end
 		end
-	else	
-		if alignment_score <= max_error_rate
-			if alignment_score < min_score
-				sub_min_score = min_score
-				min_score = alignment_score
-				min_score_bc = i
-			elseif alignment_score < sub_min_score
-				sub_min_score = alignment_score
+	else
+		for (i, bc) in enumerate(bc_seqs)
+			alignment_score = semiglobal_alignment(ws, bc, seq, max_error_rate, mismatch = mismatch, indel = indel)	
+			if alignment_score <= max_error_rate
+				if alignment_score < min_score
+					sub_min_score = min_score
+					min_score = alignment_score
+					min_score_bc = i
+				elseif alignment_score < sub_min_score
+					sub_min_score = alignment_score
+				end
 			end
 		end
 	end
