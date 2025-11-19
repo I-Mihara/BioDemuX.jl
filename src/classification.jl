@@ -227,7 +227,7 @@ function classify_sequences(FASTQ_file1::String, bc_df::DataFrame, output_dir::S
 				mode = "quality_score"
 			elseif mode == "quality_score"
 				quality_score = line
-				filename, best_start, best_end = determine_filename_trim(seq, bc_seqs, ids, ws, max_error_rate, min_delta, mismatch, indel, trim_end, gzip_output)
+				filename = determine_filename(seq, bc_seqs, ids, ws, max_error_rate, min_delta, mismatch, indel, gzip_output)
 				write_fastq_entry(output_dir * "/" * output_prefix * "." * filename, header, seq, plus, quality_score)
 				mode = "header"
 			end
