@@ -153,6 +153,15 @@ execute_demultiplexing(FASTQ_file, barcode_file, output_directory, output_prefix
 - **`gzip_output::Bool`** (default: `auto-detect`):
   - Controls whether the output FASTQ files are compressed (gzipped). By default (when this option is not explicitly set), the output will be gzipped if the input FASTQ files have a `.gz` extension, and uncompressed otherwise. You can set `gzip_output=true` to force gzipped output files or `gzip_output=false` to ensure output files are not compressed.
 
+- **`ref_search_range::String`** (default: `"1:end"`):
+  - Specifies the range within the read sequence where the barcode search should be performed. The format is `"start:end"`, where `start` and `end` can be integers (1-based index) or relative to the end of the sequence using `end` (e.g., `"1:20"`, `"end-19:end"`). This allows you to restrict the search to a specific region, improving performance and accuracy if the barcode position is known.
+
+- **`barcode_start_range::String`** (default: `"1:end"`):
+  - Specifies the allowed range for the start position of the barcode alignment within the read. The format is the same as `ref_search_range`. If the aligned barcode starts outside this range, it will not be considered a valid match.
+
+- **`barcode_end_range::String`** (default: `"1:end"`):
+  - Specifies the allowed range for the end position of the barcode alignment within the read. The format is the same as `ref_search_range`. If the aligned barcode ends outside this range, it will not be considered a valid match.
+
 ## Example: How Barcode Length and Option Values Affect Classification
 
 We assume the case where barcode length is 10, `max_error_rate ` is 0.2, `min_delta` is 0.2, `mismatch` is 1, `indel` is 2.
