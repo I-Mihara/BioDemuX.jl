@@ -117,7 +117,7 @@ BioDemuX.jl skips calculation of unnecessary path in DP matrix based on the sett
 The `execute_demultiplexing` function provides several optional parameters to control the demultiplexing process:
 
 ```julia
-execute_demultiplexing(FASTQ_file, barcode_file, output_directory, output_prefix="", max_error_rate=0.2, min_delta=0.0, mismatch=1, indel=1, classify_both=false, bc_complement=false, bc_rev=false)
+execute_demultiplexing(FASTQ_file, barcode_file, output_directory, output_prefix="", gzip_output=nothing, max_error_rate=0.2, min_delta=0.0, mismatch=1, indel=1, nindel=nothing, classify_both=false, bc_complement=false, bc_rev=false, ref_search_range="1:end", barcode_start_range="1:end", barcode_end_range="1:end")
 ```
 
 - **`max_error_rate::Float64`** (default: `0.2`): 
@@ -131,6 +131,9 @@ execute_demultiplexing(FASTQ_file, barcode_file, output_directory, output_prefix
 
 - **`indel::Int`** (default: `1`): 
   - The penalty score for insertions and deletions (indels) during sequence alignment. A higher value makes the alignment more strict for insertions or deletions.
+
+- **`nindel::Union{Int, Nothing}`** (default: `nothing`):
+  - The penalty score for insertions and deletions (indels) when the base is 'N' (wildcard). This should only be specified when using 'N' in barcodes or reads. Note that enabling this option may slow down the demultiplexing process.
 
 - **`classify_both::Bool`** (default: `false`): 
   - If set to `true`, the function will classify sequences in both `FASTQ_file1` and `FASTQ_file2` based on the alignment with sequences in `FASTQ_file1` and output separate files for each. Otherwise, it classifies only R2 sequences by default.

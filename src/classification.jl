@@ -17,6 +17,7 @@ Base.@kwdef struct DemuxConfig
 	match::Int = 0
 	mismatch::Int = 1
 	indel::Int = 1
+	nindel::Union{Int, Nothing} = nothing
 	classify_both::Bool = false
 	gzip_output::Bool = false
 	ref_search_range::DynamicRange = parse_dynamic_range("1:end")
@@ -133,17 +134,82 @@ function semiglobal_alignment(ws::SemiGlobalWorkspace, query::String, ref::Strin
 	return score / m
 end
 
+
+function semiglobal_alignment_N(ws::SemiGlobalWorkspace, query::String, ref::String, max_error::Float64, match::Int, mismatch::Int, indel::Int, nindel::Int, ref_search_range::UnitRange{Int}, max_start_pos::Int, min_end_pos::Int)
+	m = ncodeunits(query)
+	n = ncodeunits(ref)
+	q = codeunits(query)
+	r = codeunits(ref)
+	
+	if m == 0 || n == 0
+		return Inf
+	end
+	
+	allowed_error = floor(Int, max_error * m)
+	score = INF_INT
+	
+	max_indel_steps = div(allowed_error, min(indel,nindel))
+	band_offset = max(m - n - max_indel_steps, - max_start_pos - max_indel_steps)
+	
+	DP = ws.DP
+    @inbounds for i in 1:m # Initialize the DP vector.
+        DP[i] = indel * i
+    end
+	# Run DP column by column.
+	lact = min(allowed_error + 1, m)
+	@inbounds for j in ref_search_range
+		if j + band_offset >= 1
+			fact = j + band_offset
+			previous_score = allowed_error
+		else
+			fact = 1
+			previous_score = 0
+		end
+		if fact > lact
+			return score / m
+		end
+		@inbounds for i in fact:lact
+			insertion_score = DP[i] + (i == m ? INF_INT : q[i] == UInt8('N') ? nindel : indel)
+			deletion_score = previous_score + (q[i] == UInt8('N') ? nindel : indel)
+			substitution_score = (i == 1 ? 0 : DP[i-1]) + ((q[i] == r[j]||q[i]==UInt8('N')) ? match : mismatch)
+			if i != 1
+				DP[i-1] = previous_score
+			end
+			previous_score = min(insertion_score, deletion_score, substitution_score)
+		end
+		DP[lact] = previous_score
+		if lact == m && previous_score <= allowed_error
+			lact -= 1
+			if j >= min_end_pos
+				if previous_score == 0
+					return 0.0
+				end
+				score = min(score, previous_score)
+			end
+		end
+		while lact > 0 && DP[lact] > allowed_error
+			lact -= 1
+		end
+		lact += 1
+	end
+	return score / m
+end
+
 """
 Calculate and compare the similarity of a given sequence seq with the sequences in the given DataFrame bc_df.
 # Returns
 A tuple `(min_score_bc, delta)`, where `min_score_bc` is the index of the best matching sequence in `bc_df`, and `delta` is the difference between the lowest and second-lowest scores.
 """
-function find_best_matching_bc_no_delta(seq::String, bc_seqs::Vector{String}, ws::SemiGlobalWorkspace, max_error_rate::Float64, match::Int, mismatch::Int, indel::Int, ref_search_range::UnitRange{Int}, max_start_pos::Int, min_end_pos::Int)
+function find_best_matching_bc_no_delta(seq::String, bc_seqs::Vector{String}, ws::SemiGlobalWorkspace, max_error_rate::Float64, match::Int, mismatch::Int, indel::Int, nindel::Union{Int, Nothing}, ref_search_range::UnitRange{Int}, max_start_pos::Int, min_end_pos::Int)
 	min_score = Inf
 	min_score_bc = 0
 	
 	@inbounds for (i, bc) in pairs(bc_seqs)
-		alignment_score = semiglobal_alignment(ws, bc, seq, max_error_rate, match, mismatch, indel, ref_search_range, max_start_pos, min_end_pos)
+		if isnothing(nindel)
+			alignment_score = semiglobal_alignment(ws, bc, seq, max_error_rate, match, mismatch, indel, ref_search_range, max_start_pos, min_end_pos)
+		else
+			alignment_score = semiglobal_alignment_N(ws, bc, seq, max_error_rate, match, mismatch, indel, nindel, ref_search_range, max_start_pos, min_end_pos)
+		end
 
 		if alignment_score <= max_error_rate && alignment_score < min_score
 			min_score = alignment_score
@@ -154,13 +220,17 @@ function find_best_matching_bc_no_delta(seq::String, bc_seqs::Vector{String}, ws
 	return min_score_bc, Inf
 end
 
-function find_best_matching_bc_with_delta(seq::String, bc_seqs::Vector{String}, ws::SemiGlobalWorkspace, max_error_rate::Float64, match::Int, mismatch::Int, indel::Int, ref_search_range::UnitRange{Int}, max_start_pos::Int, min_end_pos::Int)
+function find_best_matching_bc_with_delta(seq::String, bc_seqs::Vector{String}, ws::SemiGlobalWorkspace, max_error_rate::Float64, match::Int, mismatch::Int, indel::Int, nindel::Union{Int, Nothing}, ref_search_range::UnitRange{Int}, max_start_pos::Int, min_end_pos::Int)
 	min_score = Inf
 	sub_min_score = Inf
 	min_score_bc = 0
 	
 	@inbounds for (i, bc) in pairs(bc_seqs)
-		alignment_score = semiglobal_alignment(ws, bc, seq, max_error_rate, match, mismatch, indel, ref_search_range, max_start_pos, min_end_pos)	
+		if isnothing(nindel)
+			alignment_score = semiglobal_alignment(ws, bc, seq, max_error_rate, match, mismatch, indel, ref_search_range, max_start_pos, min_end_pos)
+		else
+			alignment_score = semiglobal_alignment_N(ws, bc, seq, max_error_rate, match, mismatch, indel, nindel, ref_search_range, max_start_pos, min_end_pos)
+		end
 		if alignment_score <= max_error_rate
 			if alignment_score < min_score
 				sub_min_score = min_score
@@ -187,9 +257,9 @@ A tuple `(min_score_bc, delta)`, where `min_score_bc` is the index of the best m
 
 function find_best_matching_bc(seq::String, config::DemuxConfig, ref_search_range::UnitRange{Int}, max_start_pos::Int, min_end_pos::Int)
 	if config.min_delta == 0.0
-		return find_best_matching_bc_no_delta(seq, config.bc_seqs, config.ws, config.max_error_rate, config.match, config.mismatch, config.indel, ref_search_range, max_start_pos, min_end_pos)
+		return find_best_matching_bc_no_delta(seq, config.bc_seqs, config.ws, config.max_error_rate, config.match, config.mismatch, config.indel, config.nindel, ref_search_range, max_start_pos, min_end_pos)
 	else
-		return find_best_matching_bc_with_delta(seq, config.bc_seqs, config.ws, config.max_error_rate, config.match, config.mismatch, config.indel, ref_search_range, max_start_pos, min_end_pos)
+		return find_best_matching_bc_with_delta(seq, config.bc_seqs, config.ws, config.max_error_rate, config.match, config.mismatch, config.indel, config.nindel, ref_search_range, max_start_pos, min_end_pos)
 	end
 end
 
