@@ -196,17 +196,17 @@ function merge_fastq_files(paths::Vector, bc_df::DataFrame, output_dir::String, 
 	end
 end
 
-function multi_demultiplex(thread_num::Int, bc_df::DataFrame, divided_dir::String, output_prefix1::String, output_prefix2::String, config::DemuxConfig)
+function multi_demultiplex(thread_num::Int, divided_dir::String, output_prefix1::String, output_prefix2::String, config::DemuxConfig)
 	FASTQ_file1 = divided_dir * "/file1_" * lpad((thread_num - 1), 5, "0") * ".fastq" * (config.gzip_output ? ".gz" : "")
 	FASTQ_file2 = divided_dir * "/file2_" * lpad((thread_num - 1), 5, "0") * ".fastq" * (config.gzip_output ? ".gz" : "")
 	mkdir(divided_dir * "/thread" * string(thread_num))
 	output_dir = divided_dir * "/thread" * string(thread_num)
-	classify_sequences(FASTQ_file1, FASTQ_file2, bc_df, output_dir, output_prefix1, output_prefix2, config)
+	classify_sequences(FASTQ_file1, FASTQ_file2, output_dir, output_prefix1, output_prefix2, config)
 end
 
-function multi_demultiplex(thread_num::Int, bc_df::DataFrame, divided_dir::String, output_prefix::String, config::DemuxConfig)
+function multi_demultiplex(thread_num::Int, divided_dir::String, output_prefix::String, config::DemuxConfig)
 	FASTQ_file = divided_dir * "/" * lpad((thread_num - 1), 5, "0") * ".fastq" * (config.gzip_output ? ".gz" : "")
 	mkdir(divided_dir * "/thread" * string(thread_num))
 	output_dir = divided_dir * "/thread" * string(thread_num)
-	classify_sequences(FASTQ_file, bc_df, output_dir, output_prefix, config)
+	classify_sequences(FASTQ_file, output_dir, output_prefix, config)
 end
