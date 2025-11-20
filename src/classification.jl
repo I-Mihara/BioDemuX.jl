@@ -3,16 +3,28 @@ struct SemiGlobalWorkspace
 end
 SemiGlobalWorkspace(max_m::Int) = SemiGlobalWorkspace(Vector{Int}(undef, max_m))
 const INF_INT = typemax(Int) ÷ 4
+
+Base.@kwdef struct DemuxConfig
+	max_error_rate::Float64 = 0.2
+	min_delta::Float64 = 0.0
+	match::Int = 0
+	mismatch::Int = 1
+	indel::Int = 1
+	classify_both::Bool = false
+	gzip_output::Bool = false
+end
+
 """
 This function aligns `query` to `ref`, using semiglobal alignment algorithm. 
 # Returns
 An alignment score as a float, where lower values indicate better alignment.
 """
-function semiglobal_alignment(ws::SemiGlobalWorkspace, query::String, ref::String, max_error::Float64; match::Int = 0, mismatch::Int = 1, indel::Int = 1)
+function semiglobal_alignment(ws::SemiGlobalWorkspace, query::String, ref::String, max_error::Float64, match::Int, mismatch::Int, indel::Int)
 	m = ncodeunits(query)
 	n = ncodeunits(ref)
 	q = codeunits(query)
 	r = codeunits(ref)
+	
 	if m == 0 || n == 0
 		return Inf
 	end
@@ -65,49 +77,70 @@ Calculate and compare the similarity of a given sequence seq with the sequences 
 # Returns
 A tuple `(min_score_bc, delta)`, where `min_score_bc` is the index of the best matching sequence in `bc_df`, and `delta` is the difference between the lowest and second-lowest scores.
 """
-function find_best_matching_bc(seq::String, bc_seqs::Vector{String}, ws::SemiGlobalWorkspace, max_error_rate::Float64, min_delta::Float64, mismatch::Int, indel::Int)
+function find_best_matching_bc_no_delta(seq::String, bc_seqs::Vector{String}, ws::SemiGlobalWorkspace, max_error_rate::Float64, match::Int, mismatch::Int, indel::Int)
+	min_score = Inf
+	min_score_bc = 0
+	
+	@inbounds for (i, bc) in pairs(bc_seqs)
+		alignment_score = semiglobal_alignment(ws, bc, seq, max_error_rate, match, mismatch, indel)
+
+		if alignment_score <= max_error_rate && alignment_score < min_score
+			min_score = alignment_score
+			min_score_bc = i
+			max_error_rate = min(max_error_rate, min_score)
+		end
+	end
+	return min_score_bc, Inf
+end
+
+function find_best_matching_bc_with_delta(seq::String, bc_seqs::Vector{String}, ws::SemiGlobalWorkspace, max_error_rate::Float64, match::Int, mismatch::Int, indel::Int)
 	min_score = Inf
 	sub_min_score = Inf
 	min_score_bc = 0
-	if min_delta == 0.0 #to be modified
-		for (i, bc) in enumerate(bc_seqs)
-			alignment_score = semiglobal_alignment(ws, bc, seq, max_error_rate, mismatch = mismatch, indel = indel)
-
-			if alignment_score <= max_error_rate && alignment_score < min_score
+	
+	@inbounds for (i, bc) in pairs(bc_seqs)
+		alignment_score = semiglobal_alignment(ws, bc, seq, max_error_rate, match, mismatch, indel)	
+		if alignment_score <= max_error_rate
+			if alignment_score < min_score
+				sub_min_score = min_score
 				min_score = alignment_score
 				min_score_bc = i
-				max_error_rate = min(max_error_rate, min_score)
+				max_error_rate = min(max_error_rate, sub_min_score)
+			elseif alignment_score < sub_min_score
+				sub_min_score = alignment_score
+				max_error_rate = min(max_error_rate, sub_min_score)
 			end
-		end
-	else
-		for (i, bc) in enumerate(bc_seqs)
-			alignment_score = semiglobal_alignment(ws, bc, seq, max_error_rate, mismatch = mismatch, indel = indel)	
-			if alignment_score <= max_error_rate
-				if alignment_score < min_score
-					sub_min_score = min_score
-					min_score = alignment_score
-					min_score_bc = i
-				elseif alignment_score < sub_min_score
-					sub_min_score = alignment_score
-				end
-			end
+			
 		end
 	end
 	delta = sub_min_score - min_score
 	return min_score_bc, delta
 end
 
-function determine_filename(seq::String, bc_seqs::Vector{String}, ids::Vector{String}, ws::SemiGlobalWorkspace, max_error_rate::Float64, min_delta::Float64, mismatch::Int, indel::Int, gzip_output::Bool)
-	min_score_bc, delta = find_best_matching_bc(seq, bc_seqs, ws, max_error_rate, min_delta, mismatch, indel)
+"""
+Calculate and compare the similarity of a given sequence seq with the sequences in the given DataFrame bc_df.
+# Returns
+A tuple `(min_score_bc, delta)`, where `min_score_bc` is the index of the best matching sequence in `bc_df`, and `delta` is the difference between the lowest and second-lowest scores.
+"""
+function find_best_matching_bc(seq::String, bc_seqs::Vector{String}, ws::SemiGlobalWorkspace, config::DemuxConfig)
+	if config.min_delta == 0.0
+		return find_best_matching_bc_no_delta(seq, bc_seqs, ws, config.max_error_rate, config.match, config.mismatch, config.indel)
+	else
+		return find_best_matching_bc_with_delta(seq, bc_seqs, ws, config.max_error_rate, config.match, config.mismatch, config.indel)
+	end
+end
+
+function determine_filename(seq::String, bc_seqs::Vector{String}, ids::Vector{String}, ws::SemiGlobalWorkspace, config::DemuxConfig)
+	min_score_bc, delta = find_best_matching_bc(seq, bc_seqs, ws, config)
 	output_filename = ""
 	if min_score_bc == 0
 		output_filename = "unknown.fastq"
-	elseif delta < min_delta
+	elseif delta < config.min_delta
 		output_filename = "ambiguous_classification.fastq"
 	else
 		output_filename = string(ids[min_score_bc]) * ".fastq"
 	end
-	if gzip_output
+	if config.gzip_output
 		return output_filename * ".gz"
 	else
 		return output_filename
@@ -142,12 +175,12 @@ end
 """
 Compare each sequence in the FASTQ_file1 file with the sequences in bc_df, and classify the sequences of the specified file based on that comparison.
 """
-function classify_sequences(FASTQ_file1::String, FASTQ_file2::String, bc_df::DataFrame, output_dir::String, output_prefix1::String, output_prefix2::String, max_error_rate::Float64, min_delta::Float64, mismatch::Int, indel::Int, classify_both::Bool, gzip_output::Bool)
+function classify_sequences(FASTQ_file1::String, FASTQ_file2::String, bc_df::DataFrame, output_dir::String, output_prefix1::String, output_prefix2::String, config::DemuxConfig)
 	bc_seqs = Vector{String}(bc_df.Full_seq)
     ids     = Vector{String}(bc_df.ID)
     max_m   = maximum(ncodeunits.(bc_seqs))
     ws      = SemiGlobalWorkspace(max_m)
-	if classify_both
+	if config.classify_both
 		read_fastq(FASTQ_file1) do primary_file
 			read_fastq(FASTQ_file2) do secondary_file
 				header, seq, plus, quality_score = "", "", "", ""
@@ -171,7 +204,7 @@ function classify_sequences(FASTQ_file1::String, FASTQ_file2::String, bc_df::Dat
 					elseif mode == "quality_score"
 						quality_score = line1
 						quality_score2 = line2
-						filename = determine_filename(seq, bc_seqs, ids, ws, max_error_rate, min_delta, mismatch, indel, gzip_output)
+						filename = determine_filename(seq, bc_seqs, ids, ws, config)
 						write_fastq_entry(output_dir * "/" * output_prefix1 * "." * filename, header, seq, plus, quality_score)
 						write_fastq_entry(output_dir * "/" * output_prefix2 * "." * filename, header2, seq2, plus2, quality_score2)
 						mode = "header"
@@ -191,7 +224,7 @@ function classify_sequences(FASTQ_file1::String, FASTQ_file2::String, bc_df::Dat
 						header2 = line2
 						mode = "seq"
 					elseif mode == "seq"
-						filename = determine_filename(line1, bc_seqs, ids, ws, max_error_rate, min_delta, mismatch, indel, gzip_output)
+						filename = determine_filename(line1, bc_seqs, ids, ws, config)
 						seq2 = line2
 						mode = "plus"
 					elseif mode == "plus"
@@ -209,7 +242,7 @@ function classify_sequences(FASTQ_file1::String, FASTQ_file2::String, bc_df::Dat
 	close_all_fastq_ios()
 end
 
-function classify_sequences(FASTQ_file1::String, bc_df::DataFrame, output_dir::String, output_prefix::String, max_error_rate::Float64, min_delta::Float64, mismatch::Int, indel::Int, gzip_output::Bool)
+function classify_sequences(FASTQ_file1::String, bc_df::DataFrame, output_dir::String, output_prefix::String, config::DemuxConfig)
 	bc_seqs = Vector{String}(bc_df.Full_seq)
     ids     = Vector{String}(bc_df.ID)
     max_m   = maximum(ncodeunits.(bc_seqs))
@@ -230,7 +263,7 @@ function classify_sequences(FASTQ_file1::String, bc_df::DataFrame, output_dir::S
 				mode = "quality_score"
 			elseif mode == "quality_score"
 				quality_score = line
-				filename = determine_filename(seq, bc_seqs, ids, ws, max_error_rate, min_delta, mismatch, indel, gzip_output)
+				filename = determine_filename(seq, bc_seqs, ids, ws, config)
 				write_fastq_entry(output_dir * "/" * output_prefix * "." * filename, header, seq, plus, quality_score)
 				mode = "header"
 			end

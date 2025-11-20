@@ -17,7 +17,8 @@ export
 	divide_fastq,
 	multi_demultiplex,
 	merge_fastq_files,
-	execute_demultiplexing
+	execute_demultiplexing,
+	DemuxConfig
 
 
 using DataFrames, CSV, Distributed, CodecZlib, BufferedStreams

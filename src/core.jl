@@ -15,12 +15,15 @@ function execute_demultiplexing(FASTQ_file1::String, FASTQ_file2::String, bc_fil
 	if output_prefix2 == ""
 		output_prefix2 = replace(basename(FASTQ_file2), r"\.fastq(\.gz)?$|\.fq(\.gz)?$" => "")
 	end
+	
+	config = DemuxConfig(max_error_rate, min_delta, 0, mismatch, indel, classify_both, gzip_output)
+	
 	bc_df = preprocess_bc_file(bc_file, bc_complement, bc_rev)
 	if workers == 1
-		classify_sequences(FASTQ_file1, FASTQ_file2, bc_df, output_dir, output_prefix1, output_prefix2, max_error_rate, min_delta, mismatch, indel, classify_both, gzip_output)
+		classify_sequences(FASTQ_file1, FASTQ_file2, bc_df, output_dir, output_prefix1, output_prefix2, config)
 	else
 		divided_dir = divide_fastq(FASTQ_file1, FASTQ_file2, output_dir, workers, gzip_output)
-		pmap(x -> multi_demultiplex(x, bc_df, divided_dir, output_prefix1, output_prefix2, max_error_rate, min_delta, mismatch, indel, classify_both, gzip_output), 1:workers)
+		pmap(x -> multi_demultiplex(x, bc_df, divided_dir, output_prefix1, output_prefix2, config), 1:workers)
 
 		paths = []
 		for (root, dirs, files) in walkdir(divided_dir)
@@ -51,12 +54,15 @@ function execute_demultiplexing(FASTQ_file::String, bc_file::String, output_dir:
 	if output_prefix == ""
 		output_prefix = replace(basename(FASTQ_file), r"\.fastq(\.gz)?$|\.fq(\.gz)?$" => "")
 	end
+	
+	config = DemuxConfig(max_error_rate, min_delta, 0, mismatch, indel, false, gzip_output)
+
 	bc_df = preprocess_bc_file(bc_file, bc_complement, bc_rev)
 	if workers == 1
-		classify_sequences(FASTQ_file, bc_df, output_dir, output_prefix, max_error_rate, min_delta, mismatch, indel, gzip_output)
+		classify_sequences(FASTQ_file, bc_df, output_dir, output_prefix, config)
 	else
 		divided_dir = divide_fastq(FASTQ_file, output_dir, workers, gzip_output)
-		pmap(x -> multi_demultiplex(x, bc_df, divided_dir, output_prefix, max_error_rate, min_delta, mismatch, indel, gzip_output), 1:workers)
+		pmap(x -> multi_demultiplex(x, bc_df, divided_dir, output_prefix, config), 1:workers)
 		paths = []
 		for (root, dirs, files) in walkdir(divided_dir)
 			for file in files
