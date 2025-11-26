@@ -15,14 +15,21 @@ function execute_demultiplexing(FASTQ_file1::String, FASTQ_file2::String, bc_fil
 	if output_prefix2 == ""
 		output_prefix2 = replace(basename(FASTQ_file2), r"\.fastq(\.gz)?$|\.fq(\.gz)?$" => "")
 	end
+	if indel <= 0
+		error("indel must be > 0")
+	end
+	if !isnothing(nindel) && nindel <= 0
+		error("nindel must be > 0")
+	end
 	
 	bc_df = preprocess_bc_file(bc_file, bc_complement, bc_rev)
 	bc_seqs = Vector{String}(bc_df.Full_seq)
+	bc_lengths_no_N = [count(c -> c != 'N', bc) for bc in bc_seqs]
 	ids     = Vector{String}(bc_df.ID)
 	max_m   = maximum(ncodeunits.(bc_seqs))
 	ws      = SemiGlobalWorkspace(max_m)
 	
-	config = DemuxConfig(max_error_rate, min_delta, 0, mismatch, indel, nindel, classify_both, gzip_output, parse_dynamic_range(ref_search_range), parse_dynamic_range(barcode_start_range), parse_dynamic_range(barcode_end_range), bc_seqs, ids, ws)
+	config = DemuxConfig(max_error_rate, min_delta, 0, mismatch, indel, nindel, classify_both, gzip_output, parse_dynamic_range(ref_search_range), parse_dynamic_range(barcode_start_range), parse_dynamic_range(barcode_end_range), bc_seqs, bc_lengths_no_N, ids, ws)
 
 	if workers == 1
 		classify_sequences(FASTQ_file1, FASTQ_file2, output_dir, output_prefix1, output_prefix2, config)
@@ -59,14 +66,21 @@ function execute_demultiplexing(FASTQ_file::String, bc_file::String, output_dir:
 	if output_prefix == ""
 		output_prefix = replace(basename(FASTQ_file), r"\.fastq(\.gz)?$|\.fq(\.gz)?$" => "")
 	end
+	if indel <= 0
+		error("indel must be > 0")
+	end
+	if !isnothing(nindel) && nindel <= 0
+		error("nindel must be > 0")
+	end
 	
 	bc_df = preprocess_bc_file(bc_file, bc_complement, bc_rev)
 	bc_seqs = Vector{String}(bc_df.Full_seq)
+	bc_lengths_no_N = [count(c -> c != 'N', bc) for bc in bc_seqs]
 	ids     = Vector{String}(bc_df.ID)
 	max_m   = maximum(ncodeunits.(bc_seqs))
 	ws      = SemiGlobalWorkspace(max_m)
 
-	config = DemuxConfig(max_error_rate, min_delta, 0, mismatch, indel, nindel, false, gzip_output, parse_dynamic_range(ref_search_range), parse_dynamic_range(barcode_start_range), parse_dynamic_range(barcode_end_range), bc_seqs, ids, ws)
+	config = DemuxConfig(max_error_rate, min_delta, 0, mismatch, indel, nindel, false, gzip_output, parse_dynamic_range(ref_search_range), parse_dynamic_range(barcode_start_range), parse_dynamic_range(barcode_end_range), bc_seqs, bc_lengths_no_N, ids, ws)
 
 	if workers == 1
 		classify_sequences(FASTQ_file, output_dir, output_prefix, config)
