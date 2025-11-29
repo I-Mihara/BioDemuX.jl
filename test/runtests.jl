@@ -22,6 +22,8 @@ function check_output_files(output_dir::String, ideal_dir::String)
     end
 end
 
+include("test_features.jl")
+
 @testset "Single Thread Tests" begin
     @testset "Single thread with 1 FASTQ file (plain text)" begin
         mktempdir() do output_dir
