@@ -2,55 +2,58 @@
 Preprocesses the barcode file by modifying sequences based on specific criteria.
 """
 function preprocess_bc_file(bc_file::String, complement::Bool, rev::Bool)
-	if endswith(lowercase(bc_file), ".fasta")
-        sequences = String[]
-        ids = String[]
-        current_seq = ""
-        current_id = ""
-        open(bc_file, "r") do io
-            for line in eachline(io)
-                if startswith(line, '>')
-                    if !isempty(current_seq)
-                        push!(sequences, current_seq)
-                        current_seq = ""
-                    end
-                    current_id = replace(strip(line[2:end]), r"\s.*$" => "")
-                    push!(ids, current_id)
-                else
-                    current_seq *= strip(line)
-                end
-            end
-            if !isempty(current_seq)
-                push!(sequences, current_seq)
-            end
-        end
-        bc_df = DataFrame(
-            ID = ids,
-            Full_seq = sequences,
-            Full_annotation = ["B" ^ length(seq) for seq in sequences]
-        )
-    else
-        delim = endswith(lowercase(bc_file), ".csv") ? ',' : '\t'
-        bc_df = CSV.read(bc_file, DataFrame, delim = delim)
-    end
+	sequences = String[]
+	ids = String[]
+	annotations = String[]
 
-	for i in 1:nrow(bc_df)
-		prefix_region = 1:findfirst('B', bc_df.Full_annotation[i])-1
-		suffix_region = findlast('B', bc_df.Full_annotation[i])+1:length(bc_df.Full_annotation[i])
-		prefix = SubString(bc_df.Full_seq[i], prefix_region)
-		suffix = SubString(bc_df.Full_seq[i], suffix_region)
-		bc_df.Full_seq[i] = SubString(bc_df.Full_seq[i], length(prefix)+1)
-		bc_df.Full_seq[i] = SubString(bc_df.Full_seq[i], 1, length(bc_df.Full_seq[i])-length(suffix))
+	if endswith(lowercase(bc_file), ".fasta")
+		current_seq = ""
+		current_id = ""
+		open(bc_file, "r") do io
+			for line in eachline(io)
+				if startswith(line, '>')
+					if !isempty(current_seq)
+						push!(sequences, current_seq)
+						current_seq = ""
+					end
+					current_id = replace(strip(line[2:end]), r"\s.*$" => "")
+					push!(ids, current_id)
+				else
+					current_seq *= strip(line)
+				end
+			end
+			if !isempty(current_seq)
+				push!(sequences, current_seq)
+			end
+		end
+		annotations = ["B" ^ length(seq) for seq in sequences]
+	else
+		delim = endswith(lowercase(bc_file), ".csv") ? ',' : '\t'
+		df = CSV.read(bc_file, DataFrame, delim = delim)
+		sequences = Vector{String}(df.Full_seq)
+		ids = Vector{String}(df.ID)
+		annotations = Vector{String}(df.Full_annotation)
 	end
-	bc_df.Full_seq = uppercase.(bc_df.Full_seq)
-	bc_df.Full_seq = replace.(bc_df.Full_seq, "U" => "T")
+
+	for i in 1:length(sequences)
+		if length(sequences[i]) != length(annotations[i])
+			error("Length mismatch between sequence and annotation for ID: $(ids[i])")
+		end
+		sequences[i] = String([c for (c, a) in zip(sequences[i], annotations[i]) if a == 'B'])
+	end
+	
+	sequences = uppercase.(sequences)
+	sequences = replace.(sequences, "U" => "T")
 	if complement == true
-		bc_df.Full_seq = replace.(bc_df.Full_seq, "A" => "T", "T" => "A", "G" => "C", "C" => "G")
+		sequences = replace.(sequences, "A" => "T", "T" => "A", "G" => "C", "C" => "G")
 	end
 	if rev == true
-		bc_df.Full_seq = reverse.(bc_df.Full_seq)
+		sequences = reverse.(sequences)
 	end
-	return bc_df
+	
+	bc_lengths_no_N = [count(c -> c != 'N', bc) for bc in sequences]
+	
+	return sequences, bc_lengths_no_N, ids
 end
 
 """
@@ -155,7 +158,7 @@ function divide_fastq(FASTQ_file::String, output_dir::String, workers::Int, gzip
 	return divided_dir
 end
 
-function merge_fastq_files(paths::Vector, bc_df::DataFrame, output_dir::String, prefix::String, gzip_output::Bool)
+function merge_fastq_files(paths::Vector, ids::Vector{String}, output_dir::String, prefix::String, gzip_output::Bool)
 	paths_unknown = filter(x -> occursin(r".*unknown.fastq", x), paths)
 	if paths_unknown != []
 		output_file = "$output_dir/$prefix.unknown.fastq" * (gzip_output ? ".gz" : "")
@@ -180,11 +183,11 @@ function merge_fastq_files(paths::Vector, bc_df::DataFrame, output_dir::String, 
 		end
 	end
 
-	for i in 1:nrow(bc_df)
-		regex = string(bc_df.ID[i]) * ".fastq"
+	for i in 1:length(ids)
+		regex = string(ids[i]) * ".fastq"
 		paths_matched = filter(x -> occursin(regex, x), paths)
 		if paths_matched != []
-			output_file = "$output_dir/$prefix.$(bc_df.ID[i]).fastq" * (gzip_output ? ".gz" : "")
+			output_file = "$output_dir/$prefix.$(ids[i]).fastq" * (gzip_output ? ".gz" : "")
 			write_fastq(output_file) do out_io
 				for path in paths_matched
 					read_fastq(path) do in_io
