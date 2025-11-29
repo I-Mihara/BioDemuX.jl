@@ -42,7 +42,9 @@ using DataFrames
         # Read: ATT (deletion of C)
         # Cost: 1 indel. Score: 1 / 2 = 0.5
         seq_indel = "ATT"
-        score = BioDemuX.semiglobal_alignment_N(ws, bc, seq_indel, max_error, match_score, mismatch_score, indel_score, nindel_score, ref_search_range, max_start_pos, min_end_pos, non_N_m)
+        # min_end_pos must be <= read length (3) for this to match
+        # ref_search_range must be within 1:3
+        score = BioDemuX.semiglobal_alignment_N(ws, bc, seq_indel, max_error, match_score, mismatch_score, indel_score, nindel_score, 1:3, max_start_pos, 3, non_N_m)
         @test score == 0.5
     end
 
