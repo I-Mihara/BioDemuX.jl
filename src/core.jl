@@ -22,10 +22,7 @@ function execute_demultiplexing(FASTQ_file1::String, FASTQ_file2::String, bc_fil
 		error("nindel must be > 0")
 	end
 	
-	bc_df = preprocess_bc_file(bc_file, bc_complement, bc_rev)
-	bc_seqs = Vector{String}(bc_df.Full_seq)
-	bc_lengths_no_N = [count(c -> c != 'N', bc) for bc in bc_seqs]
-	ids     = Vector{String}(bc_df.ID)
+	bc_seqs, bc_lengths_no_N, ids = preprocess_bc_file(bc_file, bc_complement, bc_rev)
 	max_m   = maximum(ncodeunits.(bc_seqs))
 	ws      = SemiGlobalWorkspace(max_m)
 	
@@ -47,10 +44,10 @@ function execute_demultiplexing(FASTQ_file1::String, FASTQ_file2::String, bc_fil
 		if classify_both
 			paths_file1 = filter(x -> occursin(output_prefix1, x), paths)
 			paths_file2 = filter(x -> occursin(output_prefix2, x), paths)
-			merge_fastq_files(paths_file1, bc_df, output_dir, output_prefix1, gzip_output)
-			merge_fastq_files(paths_file2, bc_df, output_dir, output_prefix2, gzip_output)
+			merge_fastq_files(paths_file1, ids, output_dir, output_prefix1, gzip_output)
+			merge_fastq_files(paths_file2, ids, output_dir, output_prefix2, gzip_output)
 		else
-			merge_fastq_files(paths, bc_df, output_dir, output_prefix2, gzip_output)
+			merge_fastq_files(paths, ids, output_dir, output_prefix2, gzip_output)
 		end
 		rm(divided_dir,recursive=true)
 	end
@@ -73,10 +70,7 @@ function execute_demultiplexing(FASTQ_file::String, bc_file::String, output_dir:
 		error("nindel must be > 0")
 	end
 	
-	bc_df = preprocess_bc_file(bc_file, bc_complement, bc_rev)
-	bc_seqs = Vector{String}(bc_df.Full_seq)
-	bc_lengths_no_N = [count(c -> c != 'N', bc) for bc in bc_seqs]
-	ids     = Vector{String}(bc_df.ID)
+	bc_seqs, bc_lengths_no_N, ids = preprocess_bc_file(bc_file, bc_complement, bc_rev)
 	max_m   = maximum(ncodeunits.(bc_seqs))
 	ws      = SemiGlobalWorkspace(max_m)
 
@@ -94,7 +88,7 @@ function execute_demultiplexing(FASTQ_file::String, bc_file::String, output_dir:
 			end
 		end
 		paths = filter(x -> occursin(r"thread", x), paths)
-		merge_fastq_files(paths, bc_df, output_dir, output_prefix, gzip_output)
+		merge_fastq_files(paths, ids, output_dir, output_prefix, gzip_output)
 		rm(divided_dir,recursive=true)
 	end
 end
