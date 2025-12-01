@@ -75,125 +75,212 @@ This function aligns `query` to `ref`, using semiglobal alignment algorithm.
 # Returns
 An alignment score as a float, where lower values indicate better alignment.
 """
-function semiglobal_alignment(ws::SemiGlobalWorkspace, query::String, ref::String, max_error::Float64, match::Int, mismatch::Int, indel::Int, ref_search_range::UnitRange{Int}, max_start_pos::Int, min_end_pos::Int)
-	m = ncodeunits(query)
-	n = ncodeunits(ref)
-	q = codeunits(query)
-	r = codeunits(ref)
-	
-	if m == 0 || n == 0
-		return Inf
-	end
-	
-	allowed_error = floor(Int, max_error * m)
-	score = INF_INT
-	
-	max_indel_steps = div(allowed_error, indel)
-	band_offset = max(m - n - max_indel_steps, - max_start_pos - max_indel_steps)
-	
-	DP = ws.DP
-    @inbounds for i in 1:m # Initialize the DP vector.
-        DP[i] = indel * i
+abstract type AbstractScoring end
+
+struct SimpleScoring <: AbstractScoring
+    match::Int
+    mismatch::Int
+    indel::Int
+end
+
+struct NScoring <: AbstractScoring
+    match::Int
+    mismatch::Int
+    indel::Int
+    nindel::Int
+end
+
+abstract type AbstractOutputPolicy end
+
+struct ScoreOnly <: AbstractOutputPolicy end
+
+@inline function init_result(::ScoreOnly, INF_INT)
+    return INF_INT
+end
+
+@inline function update_result(::ScoreOnly, current_best, new_score, j)
+    return min(current_best, new_score)
+end
+
+@inline function finalize_result(::ScoreOnly, result, normalization)
+    return result / normalization
+end
+
+@inline function max_indel_steps_for(scoring::SimpleScoring, allowed_error::Int)
+    return div(allowed_error, scoring.indel)
+end
+
+@inline function max_indel_steps_for(scoring::NScoring, allowed_error::Int)
+    return div(allowed_error, min(scoring.indel, scoring.nindel))
+end
+
+Base.@propagate_inbounds function step_scores_main(scoring::SimpleScoring, q::Base.CodeUnits{UInt8, String}, r::Base.CodeUnits{UInt8, String}, i::Int, j::Int, previous_score::Int, DP::Vector{Int}, m::Int, INF_INT::Int)
+    indel = scoring.indel
+    match = scoring.match
+    mismatch = scoring.mismatch
+    
+    insertion_score = DP[i] + indel
+    deletion_score = previous_score + indel
+    substitution_score = DP[i-1] + (q[i] == r[j] ? match : mismatch)
+    
+    return insertion_score, deletion_score, substitution_score
+end
+
+Base.@propagate_inbounds function step_scores_main(scoring::NScoring, q::Base.CodeUnits{UInt8, String}, r::Base.CodeUnits{UInt8, String}, i::Int, j::Int, previous_score::Int, DP::Vector{Int}, m::Int, INF_INT::Int)
+    indel = scoring.indel
+    nindel = scoring.nindel
+    match = scoring.match
+    mismatch = scoring.mismatch
+    
+    is_N_q = q[i] == UInt8('N')
+    cost = is_N_q ? nindel : indel
+    
+    insertion_score = DP[i] + cost
+    deletion_score = previous_score + cost
+    
+    is_match = (q[i] == r[j] || is_N_q)
+    substitution_score = DP[i-1] + (is_match ? match : mismatch)
+    
+    return insertion_score, deletion_score, substitution_score
+end
+
+Base.@propagate_inbounds function step_scores(scoring::SimpleScoring, q::Base.CodeUnits{UInt8, String}, r::Base.CodeUnits{UInt8, String}, i::Int, j::Int, previous_score::Int, DP::Vector{Int}, m::Int, INF_INT::Int)
+    indel = scoring.indel
+    match = scoring.match
+    mismatch = scoring.mismatch
+    
+    insertion_score = (i == m ? INF_INT : DP[i] + indel)
+    deletion_score = previous_score + indel
+    substitution_score = (i == 1 ? 0 : DP[i-1]) + (q[i] == r[j] ? match : mismatch)
+    
+    return insertion_score, deletion_score, substitution_score
+end
+
+Base.@propagate_inbounds function step_scores(scoring::NScoring, q::Base.CodeUnits{UInt8, String}, r::Base.CodeUnits{UInt8, String}, i::Int, j::Int, previous_score::Int, DP::Vector{Int}, m::Int, INF_INT::Int)
+    indel = scoring.indel
+    nindel = scoring.nindel
+    match = scoring.match
+    mismatch = scoring.mismatch
+    
+    is_N_q = q[i] == UInt8('N')
+    cost = is_N_q ? nindel : indel
+    
+    insertion_score = DP[i] + (i == m ? INF_INT : cost)
+    deletion_score = previous_score + cost
+    
+    is_match = (q[i] == r[j] || is_N_q)
+    substitution_score = (i == 1 ? 0 : DP[i-1]) + (is_match ? match : mismatch)
+    
+    return insertion_score, deletion_score, substitution_score
+end
+
+function semiglobal_alignment_core(
+    ws::SemiGlobalWorkspace,
+    q, r, m::Int, n::Int,
+    max_error::Float64,
+    scoring::S,
+    output::O,
+    ref_search_range::UnitRange{Int},
+    max_start_pos::Int,
+    min_end_pos::Int,
+    normalization_length::Int
+) where {S<:AbstractScoring, O<:AbstractOutputPolicy}
+    
+    if m == 0 || n == 0
+        return Inf
     end
-	# Run DP column by column.
-	lact = min(allowed_error + 1, m)
-	@inbounds for j in ref_search_range
-		if j + band_offset >= 1
-			fact = j + band_offset
-			previous_score = allowed_error
-		else
-			fact = 1
-			previous_score = 0
-		end
-		if fact > lact
-			return score / m
-		end
-		@inbounds for i in fact:lact
-			insertion_score = (i == m ? INF_INT : DP[i]+indel)#→
-			deletion_score = previous_score + indel#↓
-			substitution_score = (i == 1 ? 0 : DP[i-1]) + (q[i] == r[j] ? match : mismatch)#↘︎
-			if i != 1
-				DP[i-1] = previous_score
-			end
-			previous_score = min(insertion_score, deletion_score, substitution_score)
-		end
-		DP[lact] = previous_score
-		if lact == m && previous_score <= allowed_error
-			lact -= 1
-			if j >= min_end_pos
-				if previous_score == 0
-					return 0.0
-				end
-				score = min(score, previous_score)
-			end
-		end
-		while lact > 0 && DP[lact] > allowed_error
-			lact -= 1
-		end
-		lact += 1
-	end
-	return score / m
+    
+    allowed_error = floor(Int, max_error * normalization_length)
+    result = init_result(output, INF_INT)
+    
+    max_indel_steps = max_indel_steps_for(scoring, allowed_error)
+    band_offset = max(m - n - max_indel_steps, - max_start_pos - max_indel_steps)
+    
+    DP = ws.DP
+    @inbounds for i in 1:m # Initialize the DP vector.
+        DP[i] = scoring.indel * i
+    end
+    # Run DP column by column.
+    lact = min(allowed_error + 1, m)
+    @inbounds for j in ref_search_range
+        if j + band_offset >= 1
+            fact = j + band_offset
+            previous_score = allowed_error
+        else
+            fact = 1
+            previous_score = 0
+        end
+        if fact > lact
+            return finalize_result(output, result, normalization_length)
+        end
+        
+        if fact <= lact
+			# 1. First iteration (i = fact)
+            insertion_score, deletion_score, substitution_score = step_scores(scoring, q, r, fact, j, previous_score, DP, m, INF_INT)
+            if fact != 1
+                DP[fact-1] = previous_score
+            end
+            previous_score = min(insertion_score, deletion_score, substitution_score)
+            
+            # 2. Main Loop (fact+1 to min(lact, m-1))
+            limit = (lact == m) ? m - 1 : lact
+            
+            for i in (fact + 1):limit
+                insertion_score, deletion_score, substitution_score = step_scores_main(scoring, q, r, i, j, previous_score, DP, m, INF_INT)
+                DP[i-1] = previous_score
+                previous_score = min(insertion_score, deletion_score, substitution_score)
+            end
+            
+            # 3. Last iteration (i = m) if needed
+            if lact == m && lact > fact
+                insertion_score, deletion_score, substitution_score = step_scores(scoring, q, r, m, j, previous_score, DP, m, INF_INT)
+                DP[m-1] = previous_score
+                previous_score = min(insertion_score, deletion_score, substitution_score)
+            end
+        end
+        
+        DP[lact] = previous_score
+        if lact == m && previous_score <= allowed_error
+            lact -= 1
+            if j >= min_end_pos
+                if previous_score == 0
+                    return finalize_result(output, 0.0, normalization_length)
+                end
+                result = update_result(output, result, previous_score, j)
+            end
+        end
+        while lact > 0 && DP[lact] > allowed_error
+            lact -= 1
+        end
+        lact += 1
+    end
+    return finalize_result(output, result, normalization_length)
+end
+
+"""
+This function aligns `query` to `ref`, using semiglobal alignment algorithm. 
+# Returns
+An alignment score as a float, where lower values indicate better alignment.
+"""
+function semiglobal_alignment(ws::SemiGlobalWorkspace, query::String, ref::String, max_error::Float64, match::Int, mismatch::Int, indel::Int, ref_search_range::UnitRange{Int}, max_start_pos::Int, min_end_pos::Int)
+    m = ncodeunits(query)
+    n = ncodeunits(ref)
+    q = codeunits(query)
+    r = codeunits(ref)
+    scoring = SimpleScoring(match, mismatch, indel)
+    output = ScoreOnly()
+    return semiglobal_alignment_core(ws, q, r, m, n, max_error, scoring, output, ref_search_range, max_start_pos, min_end_pos, m)
 end
 
 
 function semiglobal_alignment_N(ws::SemiGlobalWorkspace, query::String, ref::String, max_error::Float64, match::Int, mismatch::Int, indel::Int, nindel::Int, ref_search_range::UnitRange{Int}, max_start_pos::Int, min_end_pos::Int, non_N_m::Int)
-	m = ncodeunits(query)
-	n = ncodeunits(ref)
-	q = codeunits(query)
-	r = codeunits(ref)
-	
-	if m == 0 || n == 0
-		return Inf
-	end
-	
-	allowed_error = floor(Int, max_error * non_N_m)
-	score = INF_INT
-	
-	max_indel_steps = div(allowed_error, min(indel,nindel))
-	band_offset = max(m - n - max_indel_steps, - max_start_pos - max_indel_steps)
-	
-	DP = ws.DP
-    @inbounds for i in 1:m # Initialize the DP vector.
-        DP[i] = indel * i
-    end
-	# Run DP column by column.
-	lact = min(allowed_error + 1, m)
-	@inbounds for j in ref_search_range
-		if j + band_offset >= 1
-			fact = j + band_offset
-			previous_score = allowed_error
-		else
-			fact = 1
-			previous_score = 0
-		end
-		if fact > lact
-			return score / non_N_m
-		end
-		@inbounds for i in fact:lact
-			insertion_score = DP[i] + (i == m ? INF_INT : q[i] == UInt8('N') ? nindel : indel)
-			deletion_score = previous_score + (q[i] == UInt8('N') ? nindel : indel)
-			substitution_score = (i == 1 ? 0 : DP[i-1]) + ((q[i] == r[j]||q[i]==UInt8('N')) ? match : mismatch)
-			if i != 1
-				DP[i-1] = previous_score
-			end
-			previous_score = min(insertion_score, deletion_score, substitution_score)
-		end
-		DP[lact] = previous_score
-		if lact == m && previous_score <= allowed_error
-			lact -= 1
-			if j >= min_end_pos
-				if previous_score == 0
-					return 0.0
-				end
-				score = min(score, previous_score)
-			end
-		end
-		while lact > 0 && DP[lact] > allowed_error
-			lact -= 1
-		end
-		lact += 1
-	end
-	return score / non_N_m
+    m = ncodeunits(query)
+    n = ncodeunits(ref)
+    q = codeunits(query)
+    r = codeunits(ref)
+    scoring = NScoring(match, mismatch, indel, nindel)
+    output = ScoreOnly()
+    return semiglobal_alignment_core(ws, q, r, m, n, max_error, scoring, output, ref_search_range, max_start_pos, min_end_pos, non_N_m)
 end
 
 """
