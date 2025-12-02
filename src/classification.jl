@@ -26,7 +26,6 @@ Base.@kwdef struct DemuxConfig
 	bc_seqs::Vector{String}
 	bc_lengths_no_N::Vector{Int}
 	ids::Vector{String}
-	ws::SemiGlobalWorkspace
 end
 
 function parse_part(s::String)
@@ -343,17 +342,17 @@ A tuple `(min_score_bc, delta)`, where `min_score_bc` is the index of the best m
 """
 
 
-function find_best_matching_bc(seq::String, config::DemuxConfig, ref_search_range::UnitRange{Int}, max_start_pos::Int, min_end_pos::Int)
+function find_best_matching_bc(seq::String, config::DemuxConfig, ws::SemiGlobalWorkspace, ref_search_range::UnitRange{Int}, max_start_pos::Int, min_end_pos::Int)
 	if config.min_delta == 0.0
-		return find_best_matching_bc_no_delta(seq, config.bc_seqs, config.bc_lengths_no_N, config.ws, config.max_error_rate, config.match, config.mismatch, config.indel, config.nindel, ref_search_range, max_start_pos, min_end_pos)
+		return find_best_matching_bc_no_delta(seq, config.bc_seqs, config.bc_lengths_no_N, ws, config.max_error_rate, config.match, config.mismatch, config.indel, config.nindel, ref_search_range, max_start_pos, min_end_pos)
 	else
-		return find_best_matching_bc_with_delta(seq, config.bc_seqs, config.bc_lengths_no_N, config.ws, config.max_error_rate, config.match, config.mismatch, config.indel, config.nindel, ref_search_range, max_start_pos, min_end_pos)
+		return find_best_matching_bc_with_delta(seq, config.bc_seqs, config.bc_lengths_no_N, ws, config.max_error_rate, config.match, config.mismatch, config.indel, config.nindel, ref_search_range, max_start_pos, min_end_pos)
 	end
 end
 
 
 
-function determine_filename(seq::String, config::DemuxConfig)
+function determine_filename(seq::String, config::DemuxConfig, ws::SemiGlobalWorkspace)
 	n = ncodeunits(seq)
 	ref_search_range = resolve(config.ref_search_range, n)
 	barcode_start_range = resolve(config.barcode_start_range, n)
@@ -371,7 +370,7 @@ function determine_filename(seq::String, config::DemuxConfig)
 	
 	ref_search_range = start_j:end_j
 	
-	min_score_bc, delta = find_best_matching_bc(seq, config, ref_search_range, max_start_pos, min_end_pos)
+	min_score_bc, delta = find_best_matching_bc(seq, config, ws, ref_search_range, max_start_pos, min_end_pos)
 	output_filename = ""
 	if min_score_bc == 0
 		output_filename = "unknown.fastq"
@@ -385,121 +384,4 @@ function determine_filename(seq::String, config::DemuxConfig)
 	else
 		return output_filename
 	end
-end
-
-const _fastq_ios = Dict{String, IO}()
-
-function get_fastq_io(path::String)
-    get!(_fastq_ios, path) do
-        raw = open(path, "a")
-        io  = endswith(lowercase(path), ".gz") ?
-              GzipCompressorStream(raw) : raw
-        return BufferedOutputStream(io)
-    end
-end
-
-function write_fastq_entry(filepath, header, seq, plus, quality)
-	io=get_fastq_io(filepath)
-	write(io, header * "\n" * seq * "\n" * plus * "\n" * quality * "\n")
-end
-
-function close_all_fastq_ios()
-	for io in values(_fastq_ios)
-		flush(io)
-		close(io)
-	end
-	empty!(_fastq_ios)
-end
-
-
-"""
-Compare each sequence in the FASTQ_file1 file with the sequences in bc_df, and classify the sequences of the specified file based on that comparison.
-"""
-function classify_sequences(FASTQ_file1::String, FASTQ_file2::String, output_dir::String, output_prefix1::String, output_prefix2::String, config::DemuxConfig)
-	if config.classify_both
-		read_fastq(FASTQ_file1) do primary_file
-			read_fastq(FASTQ_file2) do secondary_file
-				header, seq, plus, quality_score = "", "", "", ""
-				header2, seq2, plus2, quality_score2 = "", "", "", ""
-				mode = "header"
-				filename = ""
-				for line1 in eachline(primary_file)
-					line2 = readline(secondary_file)
-					if line1[1] == '@' && mode == "header"
-						header = line1
-						header2 = line2
-						mode = "seq"
-					elseif mode == "seq"
-						seq = line1
-						seq2 = line2
-						mode = "plus"
-					elseif mode == "plus"
-						plus = line1
-						plus2 = line2
-						mode = "quality_score"
-					elseif mode == "quality_score"
-						quality_score = line1
-						quality_score2 = line2
-						filename = determine_filename(seq, config)
-						write_fastq_entry(output_dir * "/" * output_prefix1 * "." * filename, header, seq, plus, quality_score)
-						write_fastq_entry(output_dir * "/" * output_prefix2 * "." * filename, header2, seq2, plus2, quality_score2)
-						mode = "header"
-					end
-				end
-			end
-		end
-	else
-		read_fastq(FASTQ_file1) do primary_file
-			read_fastq(FASTQ_file2) do secondary_file
-				header2, seq2, plus2, quality_score2 = "", "", "", ""
-				mode = "header"
-				filename = ""
-				for line1 in eachline(primary_file)
-					line2 = readline(secondary_file)
-					if line1[1] == '@' && mode == "header"
-						header2 = line2
-						mode = "seq"
-					elseif mode == "seq"
-						filename = determine_filename(line1, config)
-						seq2 = line2
-						mode = "plus"
-					elseif mode == "plus"
-						plus2 = line2
-						mode = "quality_score"
-					elseif mode == "quality_score"
-						quality_score2 = line2
-						write_fastq_entry(output_dir * "/" * output_prefix2 * "." * filename, header2, seq2, plus2, quality_score2)
-						mode = "header"
-					end
-				end
-			end
-		end
-	end
-	close_all_fastq_ios()
-end
-
-function classify_sequences(FASTQ_file1::String, output_dir::String, output_prefix::String, config::DemuxConfig)
-	read_fastq(FASTQ_file1) do file
-		header, seq, plus, quality_score = "", "", "", ""
-		mode = "header"
-		filename = ""
-		for line in eachline(file)
-			if line[1] == '@' && mode == "header"
-				header = line
-				mode = "seq"
-			elseif mode == "seq"
-				seq = line
-				mode = "plus"
-			elseif mode == "plus"
-				plus = line
-				mode = "quality_score"
-			elseif mode == "quality_score"
-				quality_score = line
-				filename = determine_filename(seq, config)
-				write_fastq_entry(output_dir * "/" * output_prefix * "." * filename, header, seq, plus, quality_score)
-				mode = "header"
-			end
-		end
-	end
-	close_all_fastq_ios()
 end
