@@ -77,4 +77,28 @@ using Test
         r3 = BioDemuX.resolve(dr3, len)
         @test r3 == 95:100
     end
+
+    @testset "Range Optimization" begin
+        # Query: AAAA (m=4)
+        # Ref: TTTTAAAA (n=8)
+        # We enforce that it must end at 8 (min_end_pos=8)
+        # And must start at 1 (max_start_pos=1)
+        # With 0 error allowed.
+        # Length of match is 4. Start would be 8-4+1 = 5.
+        # 5 > 1, so impossible.
+        
+        ws = BioDemuX.SemiGlobalWorkspace(100)
+        query = "AAAA"
+        ref = "TTTTAAAA"
+        max_error = 0.0
+        match = 0
+        mismatch = 1
+        indel = 1
+        ref_search_range = 1:8
+        max_start_pos = 1
+        min_end_pos = 8
+        
+        score = BioDemuX.semiglobal_alignment(ws, query, ref, max_error, match, mismatch, indel, ref_search_range, max_start_pos, min_end_pos)
+        @test score == Inf
+    end
 end
