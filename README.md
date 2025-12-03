@@ -172,6 +172,18 @@ execute_demultiplexing(FASTQ_file, barcode_file, output_directory, output_prefix
 - **`channel_capacity::Int`** (default: `64`):
   - Specifies the capacity of the input/output channels. The recycle channel capacity is automatically set to `2 * channel_capacity`. Increasing this value can improve throughput on systems with high memory availability.
 
+- **`barcode_file2::Union{String, Nothing}`** (default: `nothing`):
+  - Specifies the path to the second barcode reference file for dual-index demultiplexing. If provided, the function performs a two-step alignment: first against `barcode_file`, then against `barcode_file2`.
+
+- **`ref_search_range2::String`** (default: `"1:end"`):
+  - Specifies the search range for the second barcode. Format is the same as `ref_search_range`.
+
+- **`barcode_start_range2::String`** (default: `"1:end"`):
+  - Specifies the allowed start range for the second barcode. Format is the same as `barcode_start_range`.
+
+- **`barcode_end_range2::String`** (default: `"1:end"`):
+  - Specifies the allowed end range for the second barcode. Format is the same as `barcode_end_range`.
+
 ## Example: How Barcode Length and Option Values Affect Classification
 
 We assume the case where barcode length is 10, `max_error_rate ` is 0.2, `min_delta` is 0.2, `mismatch` is 1, `indel` is 2.

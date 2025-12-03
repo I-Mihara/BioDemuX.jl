@@ -9,6 +9,7 @@ println("Running tests with $(Threads.nthreads()) threads")
 
 @testset "Integration Tests (Current Process)" begin
     include("integration_tests.jl")
+    include("test_dual_index.jl")
 end
 
 if Threads.nthreads() == 1

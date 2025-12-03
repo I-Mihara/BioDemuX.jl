@@ -35,10 +35,10 @@ end
 struct Chunk
     id::Int
     data::FastqChunk
-    data2::Union{FastqChunk, Nothing} # For paired-end
+    data2::Union{FastqChunk,Nothing} # For paired-end
 end
 
-function reader_task(input_channel::Channel{Chunk}, recycle_channel::Channel{Chunk}, file1::String, file2::Union{String, Nothing}, chunk_size::Int)
+function reader_task(input_channel::Channel{Chunk}, recycle_channel::Channel{Chunk}, file1::String, file2::Union{String,Nothing}, chunk_size::Int)
     read_fastq(file1) do io1
         if !isnothing(file2)
             read_fastq(file2) do io2
@@ -58,17 +58,19 @@ function reader_task(input_channel::Channel{Chunk}, recycle_channel::Channel{Chu
                         c1 = FastqChunk(chunk_size)
                         c2 = FastqChunk(chunk_size)
                     end
-                    
+
                     for _ in 1:chunk_size
-                        if eof(io1) || eof(io2) break end
-                        
+                        if eof(io1) || eof(io2)
+                            break
+                        end
+
                         # Read 4 lines for file 1
                         push!(c1, readline(io1), readline(io1), readline(io1), readline(io1))
-                        
+
                         # Read 4 lines for file 2
                         push!(c2, readline(io2), readline(io2), readline(io2), readline(io2))
                     end
-                    
+
                     if !isempty(c1.headers)
                         put!(input_channel, Chunk(chunk_id, c1, c2))
                         chunk_id += 1
@@ -86,12 +88,14 @@ function reader_task(input_channel::Channel{Chunk}, recycle_channel::Channel{Chu
                 else
                     c1 = FastqChunk(chunk_size)
                 end
-                
+
                 for _ in 1:chunk_size
-                    if eof(io1) break end
+                    if eof(io1)
+                        break
+                    end
                     push!(c1, readline(io1), readline(io1), readline(io1), readline(io1))
                 end
-                
+
                 if !isempty(c1.headers)
                     put!(input_channel, Chunk(chunk_id, c1, nothing))
                     chunk_id += 1
@@ -110,24 +114,24 @@ function worker_task(input_channel::Channel{Chunk}, output_channel::Channel{Resu
     # Create thread-local workspace
     max_m = maximum(ncodeunits.(config.bc_seqs))
     ws = SemiGlobalWorkspace(max_m)
-    
+
     for chunk in input_channel
         n = length(chunk.data.headers)
         filenames = Vector{String}(undef, n)
-        
+
         for i in 1:n
             seq = chunk.data.seqs[i]
             filenames[i] = determine_filename(seq, config, ws)
         end
-        
+
         put!(output_channel, ResultChunk(chunk, filenames))
     end
 end
 
 function writer_task(output_channel::Channel{ResultChunk}, recycle_channel::Channel{Chunk}, output_dir::String, output_prefix1::String, output_prefix2::String, config::DemuxConfig)
     # Dictionary to keep track of open file handles
-    file_handles = Dict{String, BufferedOutputStream}()
-    
+    file_handles = Dict{String,BufferedOutputStream}()
+
     function get_handle(filename::String)
         if !haskey(file_handles, filename)
             path = joinpath(output_dir, filename)
@@ -137,36 +141,36 @@ function writer_task(output_channel::Channel{ResultChunk}, recycle_channel::Chan
         end
         return file_handles[filename]
     end
-    
+
     function write_entry(io, h, s, p, q)
         write(io, h, "\n", s, "\n", p, "\n", q, "\n")
     end
 
     # Buffer for reordering chunks
-    pending_chunks = Dict{Int, ResultChunk}()
+    pending_chunks = Dict{Int,ResultChunk}()
     next_chunk_id = 1
-    
+
     for result_chunk in output_channel
         pending_chunks[result_chunk.chunk.id] = result_chunk
-        
+
         while haskey(pending_chunks, next_chunk_id)
             rc = pending_chunks[next_chunk_id]
             delete!(pending_chunks, next_chunk_id)
-            
+
             chunk = rc.chunk
             filenames = rc.filenames
             n = length(chunk.data.headers)
-            
+
             for i in 1:n
                 filename = filenames[i]
-                
+
                 if config.classify_both && !isnothing(chunk.data2)
                     # Paired end, classify both
                     # Output 1
                     fname1 = output_prefix1 * "." * filename
                     io1 = get_handle(fname1)
                     write_entry(io1, chunk.data.headers[i], chunk.data.seqs[i], chunk.data.pluses[i], chunk.data.quals[i])
-                    
+
                     # Output 2
                     fname2 = output_prefix2 * "." * filename
                     io2 = get_handle(fname2)
@@ -183,14 +187,14 @@ function writer_task(output_channel::Channel{ResultChunk}, recycle_channel::Chan
                     write_entry(io, chunk.data.headers[i], chunk.data.seqs[i], chunk.data.pluses[i], chunk.data.quals[i])
                 end
             end
-            
+
             # Recycle the chunk
             # Empty the FastqChunk objects within the Chunk before recycling
             empty!(chunk.data)
             if !isnothing(chunk.data2)
                 empty!(chunk.data2)
             end
-            
+
             # Only put back if there is space, otherwise let GC handle it
             # This prevents deadlock if the system created more chunks than recycle capacity
             lock(recycle_channel)
@@ -201,11 +205,11 @@ function writer_task(output_channel::Channel{ResultChunk}, recycle_channel::Chan
             finally
                 unlock(recycle_channel)
             end
-            
+
             next_chunk_id += 1
         end
     end
-    
+
     # Close all handles
     for io in values(file_handles)
         flush(io)
@@ -213,40 +217,100 @@ function writer_task(output_channel::Channel{ResultChunk}, recycle_channel::Chan
     end
 end
 
-function execute_demultiplexing(FASTQ_file1::String, FASTQ_file2::String, bc_file::String, output_dir::String; output_prefix1::String = "", output_prefix2::String = "", gzip_output::Union{Nothing, Bool} = nothing, max_error_rate::Float64 = 0.2, min_delta::Float64 = 0.0, mismatch::Int = 1, indel::Int = 1, nindel::Union{Int, Nothing} = nothing, classify_both::Bool = false, bc_complement::Bool = false, bc_rev::Bool = false, ref_search_range::String = "1:end", barcode_start_range::String = "1:end", barcode_end_range::String = "1:end", chunk_size::Int = 4000, channel_capacity::Int = 64)
-	if !isdir(output_dir)
-		mkdir(output_dir)
-	end
-	
-	should_gzip = endswith(lowercase(FASTQ_file1), ".gz")
-	gzip_output = isnothing(gzip_output) ? should_gzip : gzip_output
-	
-	if output_prefix1 == ""
-		output_prefix1 = replace(basename(FASTQ_file1), r"\.fastq(\.gz)?$|\.fq(\.gz)?$" => "")
-	end
-	if output_prefix2 == ""
-		output_prefix2 = replace(basename(FASTQ_file2), r"\.fastq(\.gz)?$|\.fq(\.gz)?$" => "")
-	end
-	
-	if indel <= 0
-		error("indel must be > 0")
-	end
-	if !isnothing(nindel) && nindel <= 0
-		error("nindel must be > 0")
-	end
-	
-	bc_seqs, bc_lengths_no_N, ids = preprocess_bc_file(bc_file, bc_complement, bc_rev)
-	
-    # We do NOT create ws here, it is created in worker_task
-	config = DemuxConfig(max_error_rate, min_delta, 0, mismatch, indel, nindel, classify_both, gzip_output, parse_dynamic_range(ref_search_range), parse_dynamic_range(barcode_start_range), parse_dynamic_range(barcode_end_range), bc_seqs, bc_lengths_no_N, ids)
+function execute_demultiplexing(
+    FASTQ_file1::String,
+    FASTQ_file2::String,
+    barcode_file::String,
+    output_directory::String;
+    barcode_file2::Union{String,Nothing}=nothing,
+    output_prefix1::String="",
+    output_prefix2::String="",
+    gzip_output::Union{Bool,Nothing}=nothing,
+    max_error_rate::Float64=0.2,
+    min_delta::Float64=0.0,
+    match::Int=0,
+    mismatch::Int=1,
+    indel::Int=1,
+    nindel::Union{Int,Nothing}=nothing,
+    classify_both::Bool=false,
+    bc_complement::Bool=false,
+    bc_rev::Bool=false,
+    ref_search_range::String="1:end",
+    barcode_start_range::String="1:end",
+    barcode_end_range::String="1:end",
+    ref_search_range1::String="1:end",
+    barcode_start_range1::String="1:end",
+    barcode_end_range1::String="1:end",
+    ref_search_range2::String="1:end",
+    barcode_start_range2::String="1:end",
+    barcode_end_range2::String="1:end",
+    chunk_size::Int=4000,
+    channel_capacity::Int=64
+)
 
-    # Channel setup
+    # Handle backward compatibility for range arguments
+    if !isdir(output_directory)
+        mkdir(output_directory)
+    end
+
+    # If ref_search_range is not default ("1:end") and ref_search_range1 is default, use ref_search_range
+    rsr1 = (ref_search_range != "1:end" && ref_search_range1 == "1:end") ? ref_search_range : ref_search_range1
+    bsr1 = (barcode_start_range != "1:end" && barcode_start_range1 == "1:end") ? barcode_start_range : barcode_start_range1
+    ber1 = (barcode_end_range != "1:end" && barcode_end_range1 == "1:end") ? barcode_end_range : barcode_end_range1
+
+    bc_seqs, bc_lengths_no_N, ids = preprocess_bc_file(barcode_file, bc_complement, bc_rev)
+
+    is_dual = !isnothing(barcode_file2)
+    bc_seqs2 = String[]
+    bc_lengths_no_N2 = Int[]
+    ids2 = String[]
+
+    if is_dual
+        bc_seqs2, bc_lengths_no_N2, ids2 = preprocess_bc_file(barcode_file2, bc_complement, bc_rev)
+    end
+
+    if isnothing(gzip_output)
+        gzip_output = endswith(FASTQ_file1, ".gz") || endswith(FASTQ_file2, ".gz")
+    end
+
+    if output_prefix1 == ""
+        output_prefix1 = replace(basename(FASTQ_file1), r"\.fastq(\.gz)?$" => "")
+    end
+    if output_prefix2 == ""
+        output_prefix2 = replace(basename(FASTQ_file2), r"\.fastq(\.gz)?$" => "")
+    end
+
+    config = DemuxConfig(
+        max_error_rate=max_error_rate,
+        min_delta=min_delta,
+        match=match,
+        mismatch=mismatch,
+        indel=indel,
+        nindel=nindel,
+        classify_both=classify_both,
+        gzip_output=gzip_output,
+        ref_search_range=parse_dynamic_range(rsr1),
+        barcode_start_range=parse_dynamic_range(bsr1),
+        barcode_end_range=parse_dynamic_range(ber1),
+        bc_seqs=bc_seqs,
+        bc_lengths_no_N=bc_lengths_no_N,
+        ids=ids,
+        is_dual=is_dual,
+        ref_search_range2=parse_dynamic_range(ref_search_range2),
+        barcode_start_range2=parse_dynamic_range(barcode_start_range2),
+        barcode_end_range2=parse_dynamic_range(barcode_end_range2),
+        bc_seqs2=bc_seqs2,
+        bc_lengths_no_N2=bc_lengths_no_N2,
+        ids2=ids2
+    )
+
+    # Channels
     input_channel = Channel{Chunk}(channel_capacity)
     output_channel = Channel{ResultChunk}(channel_capacity)
-    recycle_channel = Channel{Chunk}(2 * channel_capacity) # Buffer for recycling
-    
+    recycle_channel = Channel{Chunk}(2 * channel_capacity)
+
     # Start tasks
-    
+
     # Reader
     reader = Threads.@spawn begin
         try
@@ -255,15 +319,10 @@ function execute_demultiplexing(FASTQ_file1::String, FASTQ_file2::String, bc_fil
             close(input_channel)
         end
     end
-    
-    # Writer
-    writer = Threads.@spawn begin
-        writer_task(output_channel, recycle_channel, output_dir, output_prefix1, output_prefix2, config)
-    end
-    
+
     # Workers
     workers = [Threads.@spawn worker_task(input_channel, output_channel, config) for _ in 1:Threads.nthreads()]
-    
+
     # Monitor workers
     Threads.@spawn begin
         for w in workers
@@ -271,38 +330,101 @@ function execute_demultiplexing(FASTQ_file1::String, FASTQ_file2::String, bc_fil
         end
         close(output_channel)
     end
-    
+
+    # Writer
+    writer = Threads.@spawn writer_task(output_channel, recycle_channel, output_directory, output_prefix1, output_prefix2, config)
+
     wait(writer)
 end
 
-function execute_demultiplexing(FASTQ_file::String, bc_file::String, output_dir::String; output_prefix::String = "", gzip_output::Union{Nothing, Bool} = nothing, max_error_rate::Float64 = 0.2, min_delta::Float64 = 0.0, mismatch::Int = 1, indel::Int = 1, nindel::Union{Int, Nothing} = nothing, bc_complement::Bool = false, bc_rev::Bool = false, ref_search_range::String = "1:end", barcode_start_range::String = "1:end", barcode_end_range::String = "1:end", chunk_size::Int = 4000, channel_capacity::Int = 64)
-	if !isdir(output_dir)
-		mkdir(output_dir)
-	end
-	
-	should_gzip = endswith(lowercase(FASTQ_file), ".gz")
-	gzip_output = isnothing(gzip_output) ? should_gzip : gzip_output
-	
-	if output_prefix == ""
-		output_prefix = replace(basename(FASTQ_file), r"\.fastq(\.gz)?$|\.fq(\.gz)?$" => "")
-	end
-	
-	if indel <= 0
-		error("indel must be > 0")
-	end
-	if !isnothing(nindel) && nindel <= 0
-		error("nindel must be > 0")
-	end
-	
-	bc_seqs, bc_lengths_no_N, ids = preprocess_bc_file(bc_file, bc_complement, bc_rev)
-	
-	config = DemuxConfig(max_error_rate, min_delta, 0, mismatch, indel, nindel, false, gzip_output, parse_dynamic_range(ref_search_range), parse_dynamic_range(barcode_start_range), parse_dynamic_range(barcode_end_range), bc_seqs, bc_lengths_no_N, ids)
+function execute_demultiplexing(
+    FASTQ_file::String,
+    barcode_file::String,
+    output_directory::String;
+    barcode_file2::Union{String,Nothing}=nothing,
+    output_prefix::String="",
+    gzip_output::Union{Bool,Nothing}=nothing,
+    max_error_rate::Float64=0.2,
+    min_delta::Float64=0.0,
+    match::Int=0,
+    mismatch::Int=1,
+    indel::Int=1,
+    nindel::Union{Int,Nothing}=nothing,
+    bc_complement::Bool=false,
+    bc_rev::Bool=false,
+    ref_search_range::String="1:end",
+    barcode_start_range::String="1:end",
+    barcode_end_range::String="1:end",
+    ref_search_range1::String="1:end",
+    barcode_start_range1::String="1:end",
+    barcode_end_range1::String="1:end",
+    ref_search_range2::String="1:end",
+    barcode_start_range2::String="1:end",
+    barcode_end_range2::String="1:end",
+    chunk_size::Int=4000,
+    channel_capacity::Int=64
+)
 
-    # Channel setup
+    # Handle backward compatibility for range arguments
+    if !isdir(output_directory)
+        mkdir(output_directory)
+    end
+
+    rsr1 = (ref_search_range != "1:end" && ref_search_range1 == "1:end") ? ref_search_range : ref_search_range1
+    bsr1 = (barcode_start_range != "1:end" && barcode_start_range1 == "1:end") ? barcode_start_range : barcode_start_range1
+    ber1 = (barcode_end_range != "1:end" && barcode_end_range1 == "1:end") ? barcode_end_range : barcode_end_range1
+
+    bc_seqs, bc_lengths_no_N, ids = preprocess_bc_file(barcode_file, bc_complement, bc_rev)
+
+    is_dual = !isnothing(barcode_file2)
+    bc_seqs2 = String[]
+    bc_lengths_no_N2 = Int[]
+    ids2 = String[]
+
+    if is_dual
+        bc_seqs2, bc_lengths_no_N2, ids2 = preprocess_bc_file(barcode_file2, bc_complement, bc_rev)
+    end
+
+    if isnothing(gzip_output)
+        gzip_output = endswith(FASTQ_file, ".gz")
+    end
+
+    if output_prefix == ""
+        output_prefix = replace(basename(FASTQ_file), r"\.fastq(\.gz)?$" => "")
+    end
+
+    config = DemuxConfig(
+        max_error_rate=max_error_rate,
+        min_delta=min_delta,
+        match=match,
+        mismatch=mismatch,
+        indel=indel,
+        nindel=nindel,
+        classify_both=false,
+        gzip_output=gzip_output,
+        ref_search_range=parse_dynamic_range(rsr1),
+        barcode_start_range=parse_dynamic_range(bsr1),
+        barcode_end_range=parse_dynamic_range(ber1),
+        bc_seqs=bc_seqs,
+        bc_lengths_no_N=bc_lengths_no_N,
+        ids=ids,
+        is_dual=is_dual,
+        ref_search_range2=parse_dynamic_range(ref_search_range2),
+        barcode_start_range2=parse_dynamic_range(barcode_start_range2),
+        barcode_end_range2=parse_dynamic_range(barcode_end_range2),
+        bc_seqs2=bc_seqs2,
+        bc_lengths_no_N2=bc_lengths_no_N2,
+        ids2=ids2
+    )
+
+    # Channels
     input_channel = Channel{Chunk}(channel_capacity)
     output_channel = Channel{ResultChunk}(channel_capacity)
     recycle_channel = Channel{Chunk}(2 * channel_capacity)
-    
+
+    # Start tasks
+
+    # Reader
     reader = Threads.@spawn begin
         try
             reader_task(input_channel, recycle_channel, FASTQ_file, nothing, chunk_size)
@@ -310,20 +432,20 @@ function execute_demultiplexing(FASTQ_file::String, bc_file::String, output_dir:
             close(input_channel)
         end
     end
-    
-    # For single file, we pass output_prefix as output_prefix1 to writer_task
-    writer = Threads.@spawn begin
-        writer_task(output_channel, recycle_channel, output_dir, output_prefix, "", config)
-    end
-    
+
+    # Workers
     workers = [Threads.@spawn worker_task(input_channel, output_channel, config) for _ in 1:Threads.nthreads()]
-    
+
+    # Monitor workers
     Threads.@spawn begin
         for w in workers
             wait(w)
         end
         close(output_channel)
     end
-    
+
+    # Writer
+    writer = Threads.@spawn writer_task(output_channel, recycle_channel, output_directory, output_prefix, "", config)
+
     wait(writer)
 end
