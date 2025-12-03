@@ -190,7 +190,17 @@ function writer_task(output_channel::Channel{ResultChunk}, recycle_channel::Chan
             if !isnothing(chunk.data2)
                 empty!(chunk.data2)
             end
-            put!(recycle_channel, chunk)
+            
+            # Only put back if there is space, otherwise let GC handle it
+            # This prevents deadlock if the system created more chunks than recycle capacity
+            lock(recycle_channel)
+            try
+                if Base.n_avail(recycle_channel) < recycle_channel.sz_max
+                    put!(recycle_channel, chunk)
+                end
+            finally
+                unlock(recycle_channel)
+            end
             
             next_chunk_id += 1
         end
@@ -203,7 +213,7 @@ function writer_task(output_channel::Channel{ResultChunk}, recycle_channel::Chan
     end
 end
 
-function execute_demultiplexing(FASTQ_file1::String, FASTQ_file2::String, bc_file::String, output_dir::String; output_prefix1::String = "", output_prefix2::String = "", gzip_output::Union{Nothing, Bool} = nothing, max_error_rate::Float64 = 0.2, min_delta::Float64 = 0.0, mismatch::Int = 1, indel::Int = 1, nindel::Union{Int, Nothing} = nothing, classify_both::Bool = false, bc_complement::Bool = false, bc_rev::Bool = false, ref_search_range::String = "1:end", barcode_start_range::String = "1:end", barcode_end_range::String = "1:end")
+function execute_demultiplexing(FASTQ_file1::String, FASTQ_file2::String, bc_file::String, output_dir::String; output_prefix1::String = "", output_prefix2::String = "", gzip_output::Union{Nothing, Bool} = nothing, max_error_rate::Float64 = 0.2, min_delta::Float64 = 0.0, mismatch::Int = 1, indel::Int = 1, nindel::Union{Int, Nothing} = nothing, classify_both::Bool = false, bc_complement::Bool = false, bc_rev::Bool = false, ref_search_range::String = "1:end", barcode_start_range::String = "1:end", barcode_end_range::String = "1:end", chunk_size::Int = 4000, channel_capacity::Int = 64)
 	if !isdir(output_dir)
 		mkdir(output_dir)
 	end
@@ -231,10 +241,9 @@ function execute_demultiplexing(FASTQ_file1::String, FASTQ_file2::String, bc_fil
 	config = DemuxConfig(max_error_rate, min_delta, 0, mismatch, indel, nindel, classify_both, gzip_output, parse_dynamic_range(ref_search_range), parse_dynamic_range(barcode_start_range), parse_dynamic_range(barcode_end_range), bc_seqs, bc_lengths_no_N, ids)
 
     # Channel setup
-    chunk_size = 4000 # Adjustable
-    input_channel = Channel{Chunk}(32)
-    output_channel = Channel{ResultChunk}(32)
-    recycle_channel = Channel{Chunk}(64) # Buffer for recycling
+    input_channel = Channel{Chunk}(channel_capacity)
+    output_channel = Channel{ResultChunk}(channel_capacity)
+    recycle_channel = Channel{Chunk}(2 * channel_capacity) # Buffer for recycling
     
     # Start tasks
     
@@ -266,7 +275,7 @@ function execute_demultiplexing(FASTQ_file1::String, FASTQ_file2::String, bc_fil
     wait(writer)
 end
 
-function execute_demultiplexing(FASTQ_file::String, bc_file::String, output_dir::String; output_prefix::String = "", gzip_output::Union{Nothing, Bool} = nothing, max_error_rate::Float64 = 0.2, min_delta::Float64 = 0.0, mismatch::Int = 1, indel::Int = 1, nindel::Union{Int, Nothing} = nothing, bc_complement::Bool = false, bc_rev::Bool = false, ref_search_range::String = "1:end", barcode_start_range::String = "1:end", barcode_end_range::String = "1:end")
+function execute_demultiplexing(FASTQ_file::String, bc_file::String, output_dir::String; output_prefix::String = "", gzip_output::Union{Nothing, Bool} = nothing, max_error_rate::Float64 = 0.2, min_delta::Float64 = 0.0, mismatch::Int = 1, indel::Int = 1, nindel::Union{Int, Nothing} = nothing, bc_complement::Bool = false, bc_rev::Bool = false, ref_search_range::String = "1:end", barcode_start_range::String = "1:end", barcode_end_range::String = "1:end", chunk_size::Int = 4000, channel_capacity::Int = 64)
 	if !isdir(output_dir)
 		mkdir(output_dir)
 	end
@@ -290,10 +299,9 @@ function execute_demultiplexing(FASTQ_file::String, bc_file::String, output_dir:
 	config = DemuxConfig(max_error_rate, min_delta, 0, mismatch, indel, nindel, false, gzip_output, parse_dynamic_range(ref_search_range), parse_dynamic_range(barcode_start_range), parse_dynamic_range(barcode_end_range), bc_seqs, bc_lengths_no_N, ids)
 
     # Channel setup
-    chunk_size = 4000
-    input_channel = Channel{Chunk}(32)
-    output_channel = Channel{ResultChunk}(32)
-    recycle_channel = Channel{Chunk}(64)
+    input_channel = Channel{Chunk}(channel_capacity)
+    output_channel = Channel{ResultChunk}(channel_capacity)
+    recycle_channel = Channel{Chunk}(2 * channel_capacity)
     
     reader = Threads.@spawn begin
         try
