@@ -89,25 +89,26 @@ ID  Full_seq	Full_annotation
 ## Tips to Speed Up Demultiplexing
 
 ### 1. Parallel Computing
-`BioDemuX.jl` supports parallel computing, allowing faster processing of large datasets. To utilize parallel processing, follow the steps below:
+`BioDemuX.jl` supports parallel computing using multi-threading and channel-based streaming IO, allowing faster processing of large datasets with efficient memory usage. To utilize parallel processing, follow the steps below:
 
 #### Starting Julia with Multiple Threads
-To enable parallel processing, you need to start Julia with multiple threads. Use the `-p` flag followed by the number of desired threads:
+To enable parallel processing, you need to start Julia with multiple threads. Use the `-t` (or `--threads`) flag followed by the number of desired threads:
 ```bash
-./julia -p [number_of_threads]
+./julia -t [number_of_threads]
 ```
-#### Adding Worker Processes After Starting Julia
-Even after starting the Julia REPL, you can add more worker processes using the `Distributed` module:
-```julia
-using Distributed
-addprocs(n) # 'n' is the number of desired workers
+For example, to use 8 threads:
+```bash
+./julia -t 8
 ```
+You can use the `-t auto` option to automatically detect the number of available threads and start Julia with that number of threads.
+
+You can also set the `JULIA_NUM_THREADS` environment variable.
+```bash
+export JULIA_NUM_THREADS=8
+```
+
 #### Running `execute_demultiplexing` with Parallel Computing
-Once the worker processes are set up, you can perform parallel computing using the `execute_demultiplexing` function. `BioDemuX.jl` automatically divides the files based on the available worker processes for faster computation:
-```julia
-@everywhere using BioDemuX
-execute_demultiplexing(FASTQ_file1, FASTQ_file2, barcode_file, output_directory)
-```
+Once Julia is started with multiple threads, `BioDemuX.jl` automatically utilizes them for reading, writing, and processing data in parallel. No additional setup is required.
 
 ### 2. Setting Options
 BioDemuX.jl skips calculation of unnecessary path in DP matrix based on the settings of `max_error_rate`,`mismatch`. and `indel`. By setting lower max error rate or higher penalty, you can further increase computation speed.
@@ -117,7 +118,7 @@ BioDemuX.jl skips calculation of unnecessary path in DP matrix based on the sett
 The `execute_demultiplexing` function provides several optional parameters to control the demultiplexing process:
 
 ```julia
-execute_demultiplexing(FASTQ_file, barcode_file, output_directory, output_prefix="", gzip_output=nothing, max_error_rate=0.2, min_delta=0.0, mismatch=1, indel=1, nindel=nothing, classify_both=false, bc_complement=false, bc_rev=false, ref_search_range="1:end", barcode_start_range="1:end", barcode_end_range="1:end")
+execute_demultiplexing(FASTQ_file, barcode_file, output_directory, output_prefix="", gzip_output=nothing, max_error_rate=0.2, min_delta=0.0, mismatch=1, indel=1, nindel=nothing, classify_both=false, bc_complement=false, bc_rev=false, ref_search_range="1:end", barcode_start_range="1:end", barcode_end_range="1:end", chunk_size=4000, channel_capacity=64)
 ```
 
 - **`max_error_rate::Float64`** (default: `0.2`): 
@@ -164,6 +165,12 @@ execute_demultiplexing(FASTQ_file, barcode_file, output_directory, output_prefix
 
 - **`barcode_end_range::String`** (default: `"1:end"`):
   - Specifies the allowed range for the end position of the barcode alignment within the read. The format is the same as `ref_search_range`. If the aligned barcode ends outside this range, it will not be considered a valid match.
+
+- **`chunk_size::Int`** (default: `4000`):
+  - Specifies the number of reads to process in a single chunk. Larger chunk sizes can reduce overhead but increase memory usage.
+
+- **`channel_capacity::Int`** (default: `64`):
+  - Specifies the capacity of the input/output channels. The recycle channel capacity is automatically set to `2 * channel_capacity`. Increasing this value can improve throughput on systems with high memory availability.
 
 ## Example: How Barcode Length and Option Values Affect Classification
 
