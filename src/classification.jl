@@ -193,6 +193,20 @@ function semiglobal_alignment_core(
     result = init_result(output, INF_INT)
     
     max_indel_steps = max_indel_steps_for(scoring, allowed_error)
+
+    # Optimization: Check if valid alignment is possible given min_end_pos and max_start_pos
+    # Earliest possible start position for an alignment ending at min_end_pos (with max length)
+    min_valid_start = min_end_pos - (m + max_indel_steps) + 1
+    
+    if min_valid_start > max_start_pos
+        return Inf
+    end
+    
+    # Shrink ref_search_range start
+    if min_valid_start > first(ref_search_range)
+        ref_search_range = max(first(ref_search_range), min_valid_start):last(ref_search_range)
+    end
+    
     band_offset = max(m - n - max_indel_steps, - max_start_pos - max_indel_steps)
     
     DP = ws.DP
