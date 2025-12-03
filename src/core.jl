@@ -238,9 +238,6 @@ function execute_demultiplexing(
     ref_search_range::String="1:end",
     barcode_start_range::String="1:end",
     barcode_end_range::String="1:end",
-    ref_search_range1::String="1:end",
-    barcode_start_range1::String="1:end",
-    barcode_end_range1::String="1:end",
     ref_search_range2::String="1:end",
     barcode_start_range2::String="1:end",
     barcode_end_range2::String="1:end",
@@ -252,11 +249,6 @@ function execute_demultiplexing(
     if !isdir(output_directory)
         mkdir(output_directory)
     end
-
-    # If ref_search_range is not default ("1:end") and ref_search_range1 is default, use ref_search_range
-    rsr1 = (ref_search_range != "1:end" && ref_search_range1 == "1:end") ? ref_search_range : ref_search_range1
-    bsr1 = (barcode_start_range != "1:end" && barcode_start_range1 == "1:end") ? barcode_start_range : barcode_start_range1
-    ber1 = (barcode_end_range != "1:end" && barcode_end_range1 == "1:end") ? barcode_end_range : barcode_end_range1
 
     bc_seqs, bc_lengths_no_N, ids = preprocess_bc_file(barcode_file, bc_complement, bc_rev)
 
@@ -289,9 +281,9 @@ function execute_demultiplexing(
         nindel=nindel,
         classify_both=classify_both,
         gzip_output=gzip_output,
-        ref_search_range=parse_dynamic_range(rsr1),
-        barcode_start_range=parse_dynamic_range(bsr1),
-        barcode_end_range=parse_dynamic_range(ber1),
+        ref_search_range=parse_dynamic_range(ref_search_range),
+        barcode_start_range=parse_dynamic_range(barcode_start_range),
+        barcode_end_range=parse_dynamic_range(barcode_end_range),
         bc_seqs=bc_seqs,
         bc_lengths_no_N=bc_lengths_no_N,
         ids=ids,
@@ -355,9 +347,6 @@ function execute_demultiplexing(
     ref_search_range::String="1:end",
     barcode_start_range::String="1:end",
     barcode_end_range::String="1:end",
-    ref_search_range1::String="1:end",
-    barcode_start_range1::String="1:end",
-    barcode_end_range1::String="1:end",
     ref_search_range2::String="1:end",
     barcode_start_range2::String="1:end",
     barcode_end_range2::String="1:end",
@@ -369,10 +358,6 @@ function execute_demultiplexing(
     if !isdir(output_directory)
         mkdir(output_directory)
     end
-
-    rsr1 = (ref_search_range != "1:end" && ref_search_range1 == "1:end") ? ref_search_range : ref_search_range1
-    bsr1 = (barcode_start_range != "1:end" && barcode_start_range1 == "1:end") ? barcode_start_range : barcode_start_range1
-    ber1 = (barcode_end_range != "1:end" && barcode_end_range1 == "1:end") ? barcode_end_range : barcode_end_range1
 
     bc_seqs, bc_lengths_no_N, ids = preprocess_bc_file(barcode_file, bc_complement, bc_rev)
 
@@ -402,9 +387,9 @@ function execute_demultiplexing(
         nindel=nindel,
         classify_both=false,
         gzip_output=gzip_output,
-        ref_search_range=parse_dynamic_range(rsr1),
-        barcode_start_range=parse_dynamic_range(bsr1),
-        barcode_end_range=parse_dynamic_range(ber1),
+        ref_search_range=parse_dynamic_range(ref_search_range),
+        barcode_start_range=parse_dynamic_range(barcode_start_range),
+        barcode_end_range=parse_dynamic_range(barcode_end_range),
         bc_seqs=bc_seqs,
         bc_lengths_no_N=bc_lengths_no_N,
         ids=ids,

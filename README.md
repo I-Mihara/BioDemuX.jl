@@ -118,7 +118,7 @@ BioDemuX.jl skips calculation of unnecessary path in DP matrix based on the sett
 The `execute_demultiplexing` function provides several optional parameters to control the demultiplexing process:
 
 ```julia
-execute_demultiplexing(FASTQ_file, barcode_file, output_directory, output_prefix="", gzip_output=nothing, max_error_rate=0.2, min_delta=0.0, mismatch=1, indel=1, nindel=nothing, classify_both=false, bc_complement=false, bc_rev=false, ref_search_range="1:end", barcode_start_range="1:end", barcode_end_range="1:end", chunk_size=4000, channel_capacity=64)
+execute_demultiplexing(FASTQ_file, barcode_file, output_directory; barcode_file2=nothing, output_prefix="", gzip_output=nothing, max_error_rate=0.2, min_delta=0.0, mismatch=1, indel=1, nindel=nothing, bc_complement=false, bc_rev=false, ref_search_range="1:end", barcode_start_range="1:end", barcode_end_range="1:end", ref_search_range2="1:end", barcode_start_range2="1:end", barcode_end_range2="1:end", chunk_size=4000, channel_capacity=64)
 ```
 
 - **`max_error_rate::Float64`** (default: `0.2`): 

@@ -70,7 +70,7 @@ using CodecZlib
         bc_file1,
         output_dir;
         barcode_file2=bc_file2,
-        ref_search_range1="1:4",
+        ref_search_range="1:4",
         ref_search_range2="9:12",
         max_error_rate=0.0,
         chunk_size=100
