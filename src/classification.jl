@@ -1,72 +1,83 @@
 struct SemiGlobalWorkspace
-	DP::Vector{Int}
+    DP::Vector{Int}
 end
 SemiGlobalWorkspace(max_m::Int) = SemiGlobalWorkspace(Vector{Int}(undef, max_m))
 const INF_INT = typemax(Int) ÷ 4
 
 struct DynamicRange
-	start_offset::Int
-	start_from_end::Bool
-	end_offset::Int
-	end_from_end::Bool
+    start_offset::Int
+    start_from_end::Bool
+    end_offset::Int
+    end_from_end::Bool
 end
 
 Base.@kwdef struct DemuxConfig
-	max_error_rate::Float64 = 0.2
-	min_delta::Float64 = 0.0
-	match::Int = 0
-	mismatch::Int = 1
-	indel::Int = 1
-	nindel::Union{Int, Nothing} = nothing
-	classify_both::Bool = false
-	gzip_output::Bool = false
-	ref_search_range::DynamicRange = parse_dynamic_range("1:end")
-	barcode_start_range::DynamicRange = parse_dynamic_range("1:end")
-	barcode_end_range::DynamicRange = parse_dynamic_range("1:end")
-	bc_seqs::Vector{String}
-	bc_lengths_no_N::Vector{Int}
-	ids::Vector{String}
+    max_error_rate::Float64 = 0.2
+    min_delta::Float64 = 0.0
+    match::Int = 0
+    mismatch::Int = 1
+    indel::Int = 1
+    nindel::Union{Int,Nothing} = nothing
+    classify_both::Bool = false
+    gzip_output::Bool = false
+
+    # Range 1
+    ref_search_range::DynamicRange = parse_dynamic_range("1:end")
+    barcode_start_range::DynamicRange = parse_dynamic_range("1:end")
+    barcode_end_range::DynamicRange = parse_dynamic_range("1:end")
+    bc_seqs::Vector{String}
+    bc_lengths_no_N::Vector{Int}
+    ids::Vector{String}
+
+    # Dual Index Support
+    is_dual::Bool = false
+    ref_search_range2::DynamicRange = parse_dynamic_range("1:end")
+    barcode_start_range2::DynamicRange = parse_dynamic_range("1:end")
+    barcode_end_range2::DynamicRange = parse_dynamic_range("1:end")
+    bc_seqs2::Vector{String} = String[]
+    bc_lengths_no_N2::Vector{Int} = Int[]
+    ids2::Vector{String} = String[]
 end
 
 function parse_part(s::String)
-	s = strip(s)
-	from_end = occursin("end", s)
-	if from_end
-		s = replace(s, "end" => "0")
-	end
-	
-	# Handle simple arithmetic
-	val = 0
-	if occursin("-", s)
-		p = split(s, '-')
-		val = parse(Int, strip(p[1])) - parse(Int, strip(p[2]))
-	elseif occursin("+", s)
-		p = split(s, '+')
-		val = parse(Int, strip(p[1])) + parse(Int, strip(p[2]))
-	else
-		val = parse(Int, s)
-	end
-	
-	return val, from_end
+    s = strip(s)
+    from_end = occursin("end", s)
+    if from_end
+        s = replace(s, "end" => "0")
+    end
+
+    # Handle simple arithmetic
+    val = 0
+    if occursin("-", s)
+        p = split(s, '-')
+        val = parse(Int, strip(p[1])) - parse(Int, strip(p[2]))
+    elseif occursin("+", s)
+        p = split(s, '+')
+        val = parse(Int, strip(p[1])) + parse(Int, strip(p[2]))
+    else
+        val = parse(Int, s)
+    end
+
+    return val, from_end
 end
 
 function parse_dynamic_range(range_str::String)
-	parts = split(range_str, ':')
-	if length(parts) != 2
-		error("Invalid range format: $range_str. Expected 'start:end'.")
-	end
+    parts = split(range_str, ':')
+    if length(parts) != 2
+        error("Invalid range format: $range_str. Expected 'start:end'.")
+    end
 
 
-	start_offset, start_from_end = parse_part(String(parts[1]))
-	end_offset, end_from_end = parse_part(String(parts[2]))
+    start_offset, start_from_end = parse_part(String(parts[1]))
+    end_offset, end_from_end = parse_part(String(parts[2]))
 
-	return DynamicRange(start_offset, start_from_end, end_offset, end_from_end)
+    return DynamicRange(start_offset, start_from_end, end_offset, end_from_end)
 end
 
 function resolve(dr::DynamicRange, len::Int)
-	s = dr.start_from_end ? len + dr.start_offset : dr.start_offset
-	e = dr.end_from_end ? len + dr.end_offset : dr.end_offset
-	return max(1, s):min(len, e)
+    s = dr.start_from_end ? len + dr.start_offset : dr.start_offset
+    e = dr.end_from_end ? len + dr.end_offset : dr.end_offset
+    return max(1, s):min(len, e)
 end
 
 """
@@ -113,63 +124,63 @@ end
     return div(allowed_error, min(scoring.indel, scoring.nindel))
 end
 
-Base.@propagate_inbounds function step_scores_main(scoring::SimpleScoring, q::Base.CodeUnits{UInt8, String}, r::Base.CodeUnits{UInt8, String}, i::Int, j::Int, previous_score::Int, DP::Vector{Int}, m::Int, INF_INT::Int)
+Base.@propagate_inbounds function step_scores_main(scoring::SimpleScoring, q::Base.CodeUnits{UInt8,String}, r::Base.CodeUnits{UInt8,String}, i::Int, j::Int, previous_score::Int, DP::Vector{Int}, m::Int, INF_INT::Int)
     indel = scoring.indel
     match = scoring.match
     mismatch = scoring.mismatch
-    
+
     insertion_score = DP[i] + indel
     deletion_score = previous_score + indel
     substitution_score = DP[i-1] + (q[i] == r[j] ? match : mismatch)
-    
+
     return insertion_score, deletion_score, substitution_score
 end
 
-Base.@propagate_inbounds function step_scores_main(scoring::NScoring, q::Base.CodeUnits{UInt8, String}, r::Base.CodeUnits{UInt8, String}, i::Int, j::Int, previous_score::Int, DP::Vector{Int}, m::Int, INF_INT::Int)
+Base.@propagate_inbounds function step_scores_main(scoring::NScoring, q::Base.CodeUnits{UInt8,String}, r::Base.CodeUnits{UInt8,String}, i::Int, j::Int, previous_score::Int, DP::Vector{Int}, m::Int, INF_INT::Int)
     indel = scoring.indel
     nindel = scoring.nindel
     match = scoring.match
     mismatch = scoring.mismatch
-    
+
     is_N_q = q[i] == UInt8('N')
     cost = is_N_q ? nindel : indel
-    
+
     insertion_score = DP[i] + cost
     deletion_score = previous_score + cost
-    
+
     is_match = (q[i] == r[j] || is_N_q)
     substitution_score = DP[i-1] + (is_match ? match : mismatch)
-    
+
     return insertion_score, deletion_score, substitution_score
 end
 
-Base.@propagate_inbounds function step_scores(scoring::SimpleScoring, q::Base.CodeUnits{UInt8, String}, r::Base.CodeUnits{UInt8, String}, i::Int, j::Int, previous_score::Int, DP::Vector{Int}, m::Int, INF_INT::Int)
+Base.@propagate_inbounds function step_scores(scoring::SimpleScoring, q::Base.CodeUnits{UInt8,String}, r::Base.CodeUnits{UInt8,String}, i::Int, j::Int, previous_score::Int, DP::Vector{Int}, m::Int, INF_INT::Int)
     indel = scoring.indel
     match = scoring.match
     mismatch = scoring.mismatch
-    
+
     insertion_score = (i == m ? INF_INT : DP[i] + indel)
     deletion_score = previous_score + indel
     substitution_score = (i == 1 ? 0 : DP[i-1]) + (q[i] == r[j] ? match : mismatch)
-    
+
     return insertion_score, deletion_score, substitution_score
 end
 
-Base.@propagate_inbounds function step_scores(scoring::NScoring, q::Base.CodeUnits{UInt8, String}, r::Base.CodeUnits{UInt8, String}, i::Int, j::Int, previous_score::Int, DP::Vector{Int}, m::Int, INF_INT::Int)
+Base.@propagate_inbounds function step_scores(scoring::NScoring, q::Base.CodeUnits{UInt8,String}, r::Base.CodeUnits{UInt8,String}, i::Int, j::Int, previous_score::Int, DP::Vector{Int}, m::Int, INF_INT::Int)
     indel = scoring.indel
     nindel = scoring.nindel
     match = scoring.match
     mismatch = scoring.mismatch
-    
+
     is_N_q = q[i] == UInt8('N')
     cost = is_N_q ? nindel : indel
-    
+
     insertion_score = DP[i] + (i == m ? INF_INT : cost)
     deletion_score = previous_score + cost
-    
+
     is_match = (q[i] == r[j] || is_N_q)
     substitution_score = (i == 1 ? 0 : DP[i-1]) + (is_match ? match : mismatch)
-    
+
     return insertion_score, deletion_score, substitution_score
 end
 
@@ -183,32 +194,32 @@ function semiglobal_alignment_core(
     max_start_pos::Int,
     min_end_pos::Int,
     normalization_length::Int
-) where {S<:AbstractScoring, O<:AbstractOutputPolicy}
-    
+) where {S<:AbstractScoring,O<:AbstractOutputPolicy}
+
     if m == 0 || n == 0
         return Inf
     end
-    
+
     allowed_error = floor(Int, max_error * normalization_length)
     result = init_result(output, INF_INT)
-    
+
     max_indel_steps = max_indel_steps_for(scoring, allowed_error)
 
     # Optimization: Check if valid alignment is possible given min_end_pos and max_start_pos
     # Earliest possible start position for an alignment ending at min_end_pos (with max length)
     min_valid_start = min_end_pos - (m + max_indel_steps) + 1
-    
+
     if min_valid_start > max_start_pos
         return Inf
     end
-    
+
     # Shrink ref_search_range start
     if min_valid_start > first(ref_search_range)
         ref_search_range = max(first(ref_search_range), min_valid_start):last(ref_search_range)
     end
-    
-    band_offset = max(m - n - max_indel_steps, - max_start_pos - max_indel_steps)
-    
+
+    band_offset = max(m - n - max_indel_steps, -max_start_pos - max_indel_steps)
+
     DP = ws.DP
     @inbounds for i in 1:m # Initialize the DP vector.
         DP[i] = scoring.indel * i
@@ -226,24 +237,24 @@ function semiglobal_alignment_core(
         if fact > lact
             return finalize_result(output, result, normalization_length)
         end
-        
+
         if fact <= lact
-			# 1. First iteration (i = fact)
+            # 1. First iteration (i = fact)
             insertion_score, deletion_score, substitution_score = step_scores(scoring, q, r, fact, j, previous_score, DP, m, INF_INT)
             if fact != 1
                 DP[fact-1] = previous_score
             end
             previous_score = min(insertion_score, deletion_score, substitution_score)
-            
+
             # 2. Main Loop (fact+1 to min(lact, m-1))
             limit = (lact == m) ? m - 1 : lact
-            
-            for i in (fact + 1):limit
+
+            for i in (fact+1):limit
                 insertion_score, deletion_score, substitution_score = step_scores_main(scoring, q, r, i, j, previous_score, DP, m, INF_INT)
                 DP[i-1] = previous_score
                 previous_score = min(insertion_score, deletion_score, substitution_score)
             end
-            
+
             # 3. Last iteration (i = m) if needed
             if lact == m && lact > fact
                 insertion_score, deletion_score, substitution_score = step_scores(scoring, q, r, m, j, previous_score, DP, m, INF_INT)
@@ -251,7 +262,7 @@ function semiglobal_alignment_core(
                 previous_score = min(insertion_score, deletion_score, substitution_score)
             end
         end
-        
+
         DP[lact] = previous_score
         if lact == m && previous_score <= allowed_error
             lact -= 1
@@ -301,52 +312,52 @@ Calculate and compare the similarity of a given sequence seq with the sequences 
 # Returns
 A tuple `(min_score_bc, delta)`, where `min_score_bc` is the index of the best matching sequence in `bc_df`, and `delta` is the difference between the lowest and second-lowest scores.
 """
-function find_best_matching_bc_no_delta(seq::String, bc_seqs::Vector{String}, bc_lengths_no_N::Vector{Int}, ws::SemiGlobalWorkspace, max_error_rate::Float64, match::Int, mismatch::Int, indel::Int, nindel::Union{Int, Nothing}, ref_search_range::UnitRange{Int}, max_start_pos::Int, min_end_pos::Int)
-	min_score = Inf
-	min_score_bc = 0
-	
-	@inbounds for (i, bc) in pairs(bc_seqs)
-		if isnothing(nindel)
-			alignment_score = semiglobal_alignment(ws, bc, seq, max_error_rate, match, mismatch, indel, ref_search_range, max_start_pos, min_end_pos)
-		else
-			alignment_score = semiglobal_alignment_N(ws, bc, seq, max_error_rate, match, mismatch, indel, nindel, ref_search_range, max_start_pos, min_end_pos, bc_lengths_no_N[i])
-		end
+function find_best_matching_bc_no_delta(seq::String, bc_seqs::Vector{String}, bc_lengths_no_N::Vector{Int}, ws::SemiGlobalWorkspace, max_error_rate::Float64, match::Int, mismatch::Int, indel::Int, nindel::Union{Int,Nothing}, ref_search_range::UnitRange{Int}, max_start_pos::Int, min_end_pos::Int)
+    min_score = Inf
+    min_score_bc = 0
 
-		if alignment_score <= max_error_rate && alignment_score < min_score
-			min_score = alignment_score
-			min_score_bc = i
-			max_error_rate = min(max_error_rate, min_score)
-		end
-	end
-	return min_score_bc, Inf
+    @inbounds for (i, bc) in pairs(bc_seqs)
+        if isnothing(nindel)
+            alignment_score = semiglobal_alignment(ws, bc, seq, max_error_rate, match, mismatch, indel, ref_search_range, max_start_pos, min_end_pos)
+        else
+            alignment_score = semiglobal_alignment_N(ws, bc, seq, max_error_rate, match, mismatch, indel, nindel, ref_search_range, max_start_pos, min_end_pos, bc_lengths_no_N[i])
+        end
+
+        if alignment_score <= max_error_rate && alignment_score < min_score
+            min_score = alignment_score
+            min_score_bc = i
+            max_error_rate = min(max_error_rate, min_score)
+        end
+    end
+    return min_score_bc, Inf
 end
 
-function find_best_matching_bc_with_delta(seq::String, bc_seqs::Vector{String}, bc_lengths_no_N::Vector{Int}, ws::SemiGlobalWorkspace, max_error_rate::Float64, match::Int, mismatch::Int, indel::Int, nindel::Union{Int, Nothing}, ref_search_range::UnitRange{Int}, max_start_pos::Int, min_end_pos::Int)
-	min_score = Inf
-	sub_min_score = Inf
-	min_score_bc = 0
-	
-	@inbounds for (i, bc) in pairs(bc_seqs)
-		if isnothing(nindel)
-			alignment_score = semiglobal_alignment(ws, bc, seq, max_error_rate, match, mismatch, indel, ref_search_range, max_start_pos, min_end_pos)
-		else
-			alignment_score = semiglobal_alignment_N(ws, bc, seq, max_error_rate, match, mismatch, indel, nindel, ref_search_range, max_start_pos, min_end_pos, bc_lengths_no_N[i])
-		end
-		if alignment_score <= max_error_rate
-			if alignment_score < min_score
-				sub_min_score = min_score
-				min_score = alignment_score
-				min_score_bc = i
-				max_error_rate = min(max_error_rate, sub_min_score)
-			elseif alignment_score < sub_min_score
-				sub_min_score = alignment_score
-				max_error_rate = min(max_error_rate, sub_min_score)
-			end
-			
-		end
-	end
-	delta = sub_min_score - min_score
-	return min_score_bc, delta
+function find_best_matching_bc_with_delta(seq::String, bc_seqs::Vector{String}, bc_lengths_no_N::Vector{Int}, ws::SemiGlobalWorkspace, max_error_rate::Float64, match::Int, mismatch::Int, indel::Int, nindel::Union{Int,Nothing}, ref_search_range::UnitRange{Int}, max_start_pos::Int, min_end_pos::Int)
+    min_score = Inf
+    sub_min_score = Inf
+    min_score_bc = 0
+
+    @inbounds for (i, bc) in pairs(bc_seqs)
+        if isnothing(nindel)
+            alignment_score = semiglobal_alignment(ws, bc, seq, max_error_rate, match, mismatch, indel, ref_search_range, max_start_pos, min_end_pos)
+        else
+            alignment_score = semiglobal_alignment_N(ws, bc, seq, max_error_rate, match, mismatch, indel, nindel, ref_search_range, max_start_pos, min_end_pos, bc_lengths_no_N[i])
+        end
+        if alignment_score <= max_error_rate
+            if alignment_score < min_score
+                sub_min_score = min_score
+                min_score = alignment_score
+                min_score_bc = i
+                max_error_rate = min(max_error_rate, sub_min_score)
+            elseif alignment_score < sub_min_score
+                sub_min_score = alignment_score
+                max_error_rate = min(max_error_rate, sub_min_score)
+            end
+
+        end
+    end
+    delta = sub_min_score - min_score
+    return min_score_bc, delta
 end
 
 """
@@ -356,46 +367,78 @@ A tuple `(min_score_bc, delta)`, where `min_score_bc` is the index of the best m
 """
 
 
-function find_best_matching_bc(seq::String, config::DemuxConfig, ws::SemiGlobalWorkspace, ref_search_range::UnitRange{Int}, max_start_pos::Int, min_end_pos::Int)
-	if config.min_delta == 0.0
-		return find_best_matching_bc_no_delta(seq, config.bc_seqs, config.bc_lengths_no_N, ws, config.max_error_rate, config.match, config.mismatch, config.indel, config.nindel, ref_search_range, max_start_pos, min_end_pos)
-	else
-		return find_best_matching_bc_with_delta(seq, config.bc_seqs, config.bc_lengths_no_N, ws, config.max_error_rate, config.match, config.mismatch, config.indel, config.nindel, ref_search_range, max_start_pos, min_end_pos)
-	end
+function find_best_matching_bc(seq::String, bc_seqs::Vector{String}, bc_lengths_no_N::Vector{Int}, config::DemuxConfig, ws::SemiGlobalWorkspace, ref_search_range::UnitRange{Int}, max_start_pos::Int, min_end_pos::Int)
+    if config.min_delta == 0.0
+        return find_best_matching_bc_no_delta(seq, bc_seqs, bc_lengths_no_N, ws, config.max_error_rate, config.match, config.mismatch, config.indel, config.nindel, ref_search_range, max_start_pos, min_end_pos)
+    else
+        return find_best_matching_bc_with_delta(seq, bc_seqs, bc_lengths_no_N, ws, config.max_error_rate, config.match, config.mismatch, config.indel, config.nindel, ref_search_range, max_start_pos, min_end_pos)
+    end
 end
 
 
 
 function determine_filename(seq::String, config::DemuxConfig, ws::SemiGlobalWorkspace)
-	n = ncodeunits(seq)
-	ref_search_range = resolve(config.ref_search_range, n)
-	barcode_start_range = resolve(config.barcode_start_range, n)
-	barcode_end_range = resolve(config.barcode_end_range, n)
-	
-	start_j = max(first(ref_search_range), first(barcode_start_range), 1)
-	end_j   = min(last(ref_search_range),  last(barcode_end_range), n)
-	max_start_pos = last(barcode_start_range)
-	min_end_pos = first(barcode_end_range)
-	
-	if start_j > end_j || start_j > max_start_pos || end_j < min_end_pos
-		# Invalid range, treat as unknown.
-		return "unknown.fastq"
-	end
-	
-	ref_search_range = start_j:end_j
-	
-	min_score_bc, delta = find_best_matching_bc(seq, config, ws, ref_search_range, max_start_pos, min_end_pos)
-	output_filename = ""
-	if min_score_bc == 0
-		output_filename = "unknown.fastq"
-	elseif delta < config.min_delta
-		output_filename = "ambiguous_classification.fastq"
-	else
-		output_filename = string(config.ids[min_score_bc]) * ".fastq"
-	end
-	if config.gzip_output
-		return output_filename * ".gz"
-	else
-		return output_filename
-	end
+    n = ncodeunits(seq)
+
+    # --- Pass 1: Barcode 1 ---
+    ref_search_range1 = resolve(config.ref_search_range, n)
+    barcode_start_range1 = resolve(config.barcode_start_range, n)
+    barcode_end_range1 = resolve(config.barcode_end_range, n)
+
+    start_j1 = max(first(ref_search_range1), first(barcode_start_range1), 1)
+    end_j1 = min(last(ref_search_range1), last(barcode_end_range1), n)
+    max_start_pos1 = last(barcode_start_range1)
+    min_end_pos1 = first(barcode_end_range1)
+
+    if start_j1 > end_j1 || start_j1 > max_start_pos1 || end_j1 < min_end_pos1
+        return "unknown.fastq"
+    end
+
+    ref_search_range1 = start_j1:end_j1
+
+    min_score_bc1, delta1 = find_best_matching_bc(seq, config.bc_seqs, config.bc_lengths_no_N, config, ws, ref_search_range1, max_start_pos1, min_end_pos1)
+
+    if min_score_bc1 == 0
+        return "unknown.fastq"
+    elseif delta1 < config.min_delta
+        return "ambiguous_classification.fastq"
+    end
+
+    # --- Pass 2: Barcode 2 (if dual) ---
+    if config.is_dual
+        ref_search_range2 = resolve(config.ref_search_range2, n)
+        barcode_start_range2 = resolve(config.barcode_start_range2, n)
+        barcode_end_range2 = resolve(config.barcode_end_range2, n)
+
+        start_j2 = max(first(ref_search_range2), first(barcode_start_range2), 1)
+        end_j2 = min(last(ref_search_range2), last(barcode_end_range2), n)
+        max_start_pos2 = last(barcode_start_range2)
+        min_end_pos2 = first(barcode_end_range2)
+
+        if start_j2 > end_j2 || start_j2 > max_start_pos2 || end_j2 < min_end_pos2
+            return "unknown.fastq"
+        end
+
+        ref_search_range2 = start_j2:end_j2
+
+        min_score_bc2, delta2 = find_best_matching_bc(seq, config.bc_seqs2, config.bc_lengths_no_N2, config, ws, ref_search_range2, max_start_pos2, min_end_pos2)
+
+        if min_score_bc2 == 0
+            return "unknown.fastq"
+        elseif delta2 < config.min_delta
+            return "ambiguous_classification.fastq"
+        end
+
+        # Combine IDs
+        output_filename = string(config.ids[min_score_bc1]) * "." * string(config.ids2[min_score_bc2]) * ".fastq"
+    else
+        # Single mode
+        output_filename = string(config.ids[min_score_bc1]) * ".fastq"
+    end
+
+    if config.gzip_output
+        return output_filename * ".gz"
+    else
+        return output_filename
+    end
 end
