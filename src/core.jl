@@ -108,23 +108,32 @@ end
 struct ResultChunk
     chunk::Chunk
     filenames::Vector{String}
+    trim_ranges::Union{Vector{Union{UnitRange{Int},Nothing}},Nothing}
 end
 
 function worker_task(input_channel::Channel{Chunk}, output_channel::Channel{ResultChunk}, config::DemuxConfig)
     # Create thread-local workspace
     max_m = maximum(ncodeunits.(config.bc_seqs))
-    ws = SemiGlobalWorkspace(max_m)
-
+    if config.is_dual && !isempty(config.bc_seqs2)
+        max_m = max(max_m, maximum(ncodeunits.(config.bc_seqs2)))
+    end
+    ws = SemiGlobalWorkspace(max_m, !isnothing(config.trim_side) || !isnothing(config.trim_side2))
     for chunk in input_channel
         n = length(chunk.data.headers)
         filenames = Vector{String}(undef, n)
+        do_trim = !isnothing(config.trim_side) || !isnothing(config.trim_side2)
+        trim_ranges = do_trim ? Vector{Union{UnitRange{Int},Nothing}}(undef, n) : nothing
 
         for i in 1:n
             seq = chunk.data.seqs[i]
-            filenames[i] = determine_filename(seq, config, ws)
+            filename, trim_range = determine_filename(seq, config, ws)
+            filenames[i] = filename
+            if !isnothing(trim_ranges)
+                trim_ranges[i] = trim_range
+            end
         end
 
-        put!(output_channel, ResultChunk(chunk, filenames))
+        put!(output_channel, ResultChunk(chunk, filenames, trim_ranges))
     end
 end
 
@@ -159,17 +168,35 @@ function writer_task(output_channel::Channel{ResultChunk}, recycle_channel::Chan
 
             chunk = rc.chunk
             filenames = rc.filenames
+            trim_ranges = rc.trim_ranges
             n = length(chunk.data.headers)
 
             for i in 1:n
                 filename = filenames[i]
+
+                # Prepare data to write
+                h1, s1, p1, q1 = chunk.data.headers[i], chunk.data.seqs[i], chunk.data.pluses[i], chunk.data.quals[i]
+
+                # Apply trimming if needed (only to Read 1)
+                if !isnothing(trim_ranges) && !isnothing(trim_ranges[i])
+                    r = trim_ranges[i]
+                    # Ensure range is within bounds (it should be, but safety check)
+                    r = intersect(r, 1:ncodeunits(s1))
+                    if !isempty(r)
+                        s1 = s1[r]
+                        q1 = q1[r]
+                    else
+                        s1 = ""
+                        q1 = ""
+                    end
+                end
 
                 if config.classify_both && !isnothing(chunk.data2)
                     # Paired end, classify both
                     # Output 1
                     fname1 = output_prefix1 * "." * filename
                     io1 = get_handle(fname1)
-                    write_entry(io1, chunk.data.headers[i], chunk.data.seqs[i], chunk.data.pluses[i], chunk.data.quals[i])
+                    write_entry(io1, h1, s1, p1, q1)
 
                     # Output 2
                     fname2 = output_prefix2 * "." * filename
@@ -184,7 +211,7 @@ function writer_task(output_channel::Channel{ResultChunk}, recycle_channel::Chan
                     # Single end
                     fname = output_prefix1 * "." * filename
                     io = get_handle(fname)
-                    write_entry(io, chunk.data.headers[i], chunk.data.seqs[i], chunk.data.pluses[i], chunk.data.quals[i])
+                    write_entry(io, h1, s1, p1, q1)
                 end
             end
 
@@ -242,8 +269,14 @@ function execute_demultiplexing(
     barcode_start_range2::String="1:end",
     barcode_end_range2::String="1:end",
     chunk_size::Int=4000,
-    channel_capacity::Int=64
+    channel_capacity::Int=64,
+    trim_side::Union{Int,Nothing}=nothing
 )
+
+    # Validate trim_side
+    if !isnothing(trim_side) && trim_side != 3 && trim_side != 5
+        error("trim_side must be 3 or 5, got $trim_side")
+    end
 
     # Handle backward compatibility for range arguments
     if !isdir(output_directory)
@@ -293,7 +326,8 @@ function execute_demultiplexing(
         barcode_end_range2=parse_dynamic_range(barcode_end_range2),
         bc_seqs2=bc_seqs2,
         bc_lengths_no_N2=bc_lengths_no_N2,
-        ids2=ids2
+        ids2=ids2,
+        trim_side=trim_side
     )
 
     # Channels
@@ -351,8 +385,18 @@ function execute_demultiplexing(
     barcode_start_range2::String="1:end",
     barcode_end_range2::String="1:end",
     chunk_size::Int=4000,
-    channel_capacity::Int=64
+    channel_capacity::Int=64,
+    trim_side::Union{Int,Nothing}=nothing,
+    trim_side2::Union{Int,Nothing}=nothing
 )
+
+    # Validate trim_side
+    if !isnothing(trim_side) && trim_side != 3 && trim_side != 5
+        error("trim_side must be 3 or 5, got $trim_side")
+    end
+    if !isnothing(trim_side2) && trim_side2 != 3 && trim_side2 != 5
+        error("trim_side2 must be 3 or 5, got $trim_side2")
+    end
 
     # Handle backward compatibility for range arguments
     if !isdir(output_directory)
@@ -399,7 +443,9 @@ function execute_demultiplexing(
         barcode_end_range2=parse_dynamic_range(barcode_end_range2),
         bc_seqs2=bc_seqs2,
         bc_lengths_no_N2=bc_lengths_no_N2,
-        ids2=ids2
+        ids2=ids2,
+        trim_side=trim_side,
+        trim_side2=trim_side2
     )
 
     # Channels

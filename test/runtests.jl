@@ -3,13 +3,17 @@ using Test
 using CodecZlib
 
 include("common.jl")
-include("unit_tests.jl")
+
+@testset "Unit Tests" begin
+    include("unit/alignment.jl")
+    include("unit/trimming.jl")
+end
 
 println("Running tests with $(Threads.nthreads()) threads")
 
 @testset "Integration Tests (Current Process)" begin
-    include("integration_tests.jl")
-    include("test_dual_index.jl")
+    include("integration/single_barcode.jl")
+    include("integration/dual_barcode.jl")
 end
 
 if Threads.nthreads() == 1
