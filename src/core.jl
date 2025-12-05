@@ -386,12 +386,16 @@ function execute_demultiplexing(
     barcode_end_range2::String="1:end",
     chunk_size::Int=4000,
     channel_capacity::Int=64,
-    trim_side::Union{Int,Nothing}=nothing
+    trim_side::Union{Int,Nothing}=nothing,
+    trim_side2::Union{Int,Nothing}=nothing
 )
 
     # Validate trim_side
     if !isnothing(trim_side) && trim_side != 3 && trim_side != 5
         error("trim_side must be 3 or 5, got $trim_side")
+    end
+    if !isnothing(trim_side2) && trim_side2 != 3 && trim_side2 != 5
+        error("trim_side2 must be 3 or 5, got $trim_side2")
     end
 
     # Handle backward compatibility for range arguments
@@ -440,7 +444,8 @@ function execute_demultiplexing(
         bc_seqs2=bc_seqs2,
         bc_lengths_no_N2=bc_lengths_no_N2,
         ids2=ids2,
-        trim_side=trim_side
+        trim_side=trim_side,
+        trim_side2=trim_side2
     )
 
     # Channels
