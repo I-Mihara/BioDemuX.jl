@@ -91,6 +91,41 @@ using BioDemuX: SemiGlobalWorkspace, semiglobal_alignment, determine_filename, D
         @test end_pos == 4
     end
 
+    @testset "Dual Trimming" begin
+        # Read: PREFIX + BC1 + MIDDLE + BC2 + SUFFIX
+        # BC1: 5' trim (keep after)
+        # BC2: 3' trim (keep before)
+        # Result: MIDDLE
+
+        # Read: AAAAA TTTTT CCCCC GGGGG TTTTT
+        # BC1: TTTTT (at 6:10) -> Trim 5' -> Keep 11:end (CCCCC GGGGG TTTTT)
+        # BC2: GGGGG (at 16:20) -> Trim 3' -> Keep 1:15 (AAAAA TTTTT CCCCC)
+        # Intersect: 11:15 (CCCCC)
+
+        read = "AAAAATTTTTCCCCCGGGGGTTTTT"
+        bc1 = "TTTTT"
+        bc2 = "GGGGG"
+
+        config = DemuxConfig(
+            bc_seqs=[bc1], bc_lengths_no_N=[5], ids=["id1"],
+            is_dual=true,
+            bc_seqs2=[bc2], bc_lengths_no_N2=[5], ids2=["id2"],
+            trim_side=5, # Trim 5' of BC1
+            trim_side2=3, # Trim 3' of BC2
+            ref_search_range=BioDemuX.parse_dynamic_range("1:end"),
+            barcode_start_range=BioDemuX.parse_dynamic_range("1:end"),
+            barcode_end_range=BioDemuX.parse_dynamic_range("1:end"),
+            ref_search_range2=BioDemuX.parse_dynamic_range("1:end"),
+            barcode_start_range2=BioDemuX.parse_dynamic_range("1:end"),
+            barcode_end_range2=BioDemuX.parse_dynamic_range("1:end")
+        )
+
+        fname, trim_range = determine_filename(read, config, ws)
+        @test fname == "id1.id2.fastq"
+        @test trim_range == 11:15
+        @test read[trim_range] == "CCCCC"
+    end
+
     @testset "Performance / No Trim" begin
         # Ensure no regression (basic check)
         ws_no_trim = SemiGlobalWorkspace(100) # trim=false by default

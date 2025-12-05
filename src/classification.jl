@@ -42,6 +42,7 @@ Base.@kwdef struct DemuxConfig
 
     # Trimming
     trim_side::Union{Int,Nothing} = nothing
+    trim_side2::Union{Int,Nothing} = nothing
 end
 
 function parse_part(s::String)
@@ -584,9 +585,6 @@ function determine_filename(seq::String, config::DemuxConfig, ws::SemiGlobalWork
 
     # --- Pass 2: Barcode 2 (if dual) ---
     if config.is_dual
-        if !isnothing(config.trim_side)
-            error("Trimming is not supported in dual mode")
-        end
 
         ref_search_range2 = resolve(config.ref_search_range2, n)
         barcode_start_range2 = resolve(config.barcode_start_range2, n)
@@ -603,7 +601,7 @@ function determine_filename(seq::String, config::DemuxConfig, ws::SemiGlobalWork
 
         ref_search_range2 = start_j2:end_j2
 
-        min_score_bc2, delta2, _, _ = find_best_matching_bc(seq, config.bc_seqs2, config.bc_lengths_no_N2, config, ws, ref_search_range2, max_start_pos2, min_end_pos2)
+        min_score_bc2, delta2, best_start2, best_end2 = find_best_matching_bc(seq, config.bc_seqs2, config.bc_lengths_no_N2, config, ws, ref_search_range2, max_start_pos2, min_end_pos2)
 
         if min_score_bc2 == 0
             return "unknown.fastq", nothing
@@ -619,16 +617,36 @@ function determine_filename(seq::String, config::DemuxConfig, ws::SemiGlobalWork
     end
 
     trim_range = nothing
+
+    # Calculate trim range for BC1
+    trim_range1 = nothing
     if !isnothing(config.trim_side)
         if config.trim_side == 3
-            # Keep 1 : start_pos - 1
-            # Clamp best_start1 to 1 if it's negative (origin started before read)
             safe_start = max(1, best_start1)
-            trim_range = 1:(safe_start-1)
+            trim_range1 = 1:(safe_start-1)
         elseif config.trim_side == 5
-            # Keep end_pos + 1 : end
-            trim_range = (best_end1+1):n
+            trim_range1 = (best_end1+1):n
         end
+    end
+
+    # Calculate trim range for BC2 (if dual)
+    trim_range2 = nothing
+    if config.is_dual && !isnothing(config.trim_side2)
+        if config.trim_side2 == 3
+            safe_start2 = max(1, best_start2)
+            trim_range2 = 1:(safe_start2-1)
+        elseif config.trim_side2 == 5
+            trim_range2 = (best_end2+1):n
+        end
+    end
+
+    # Combine trim ranges
+    if !isnothing(trim_range1) && !isnothing(trim_range2)
+        trim_range = intersect(trim_range1, trim_range2)
+    elseif !isnothing(trim_range1)
+        trim_range = trim_range1
+    elseif !isnothing(trim_range2)
+        trim_range = trim_range2
     end
 
     if config.gzip_output

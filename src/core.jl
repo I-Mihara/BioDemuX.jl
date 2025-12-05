@@ -114,12 +114,15 @@ end
 function worker_task(input_channel::Channel{Chunk}, output_channel::Channel{ResultChunk}, config::DemuxConfig)
     # Create thread-local workspace
     max_m = maximum(ncodeunits.(config.bc_seqs))
-    ws = SemiGlobalWorkspace(max_m, !isnothing(config.trim_side))
-
+    if config.is_dual && !isempty(config.bc_seqs2)
+        max_m = max(max_m, maximum(ncodeunits.(config.bc_seqs2)))
+    end
+    ws = SemiGlobalWorkspace(max_m, !isnothing(config.trim_side) || !isnothing(config.trim_side2))
     for chunk in input_channel
         n = length(chunk.data.headers)
         filenames = Vector{String}(undef, n)
-        trim_ranges = isnothing(config.trim_side) ? nothing : Vector{Union{UnitRange{Int},Nothing}}(undef, n)
+        do_trim = !isnothing(config.trim_side) || !isnothing(config.trim_side2)
+        trim_ranges = do_trim ? Vector{Union{UnitRange{Int},Nothing}}(undef, n) : nothing
 
         for i in 1:n
             seq = chunk.data.seqs[i]
