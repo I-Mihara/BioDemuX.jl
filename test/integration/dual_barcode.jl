@@ -94,3 +94,69 @@ using CodecZlib
 
     rm(tmp_dir, recursive=true)
 end
+
+@testset "Dual Barcode Trimming" begin
+    # Create temporary files
+    tmp_dir = mktempdir()
+
+    # 1. Create Barcode Files
+    bc_file1 = joinpath(tmp_dir, "bc1.tsv")
+    open(bc_file1, "w") do io
+        println(io, "Full_seq\tID\tFull_annotation")
+        println(io, "AAAA\tID1_A\tBBBB")
+    end
+
+    bc_file2 = joinpath(tmp_dir, "bc2.tsv")
+    open(bc_file2, "w") do io
+        println(io, "Full_seq\tID\tFull_annotation")
+        println(io, "TTTT\tID2_T\tBBBB")
+    end
+
+    # 2. Create FASTQ File
+    # Structure: [BC1:AAAA] [Linker:TATA] [BC2:TTTT] [Seq:ACGT]
+    # BC1 at 1:4
+    # BC2 at 9:12
+    # Trim 5' of BC1 -> Keep 5:end (TATA TTTT ACGT)
+    # Trim 3' of BC2 -> Keep 1:8 (AAAA TATA)
+    # Intersection -> 5:8 (TATA)
+
+    fastq_file = joinpath(tmp_dir, "test_trim.fastq")
+    open(fastq_file, "w") do io
+        println(io, "@read1")
+        println(io, "AAAATATATTTTACGT")
+        println(io, "+")
+        println(io, "IIIIIIIIIIIIIIII")
+    end
+
+    output_dir = joinpath(tmp_dir, "output_trim")
+    mkdir(output_dir)
+
+    # 3. Execute Demultiplexing with Trimming
+    BioDemuX.execute_demultiplexing(
+        fastq_file,
+        bc_file1,
+        output_dir;
+        barcode_file2=bc_file2,
+        ref_search_range="1:4",
+        ref_search_range2="9:12",
+        max_error_rate=0.0,
+        chunk_size=100,
+        trim_side=5,   # Trim 5' of BC1 (Keep after BC1)
+        trim_side2=3   # Trim 3' of BC2 (Keep before BC2)
+    )
+
+    # 4. Verify Output
+    outfile = joinpath(output_dir, "test_trim.ID1_A.ID2_T.fastq")
+    @test isfile(outfile)
+
+    content = read(outfile, String)
+    # Should contain the sequence "TATA" (the linker)
+    # The header remains @read1
+    # The quality score should also be trimmed to 4 chars
+
+    lines = split(strip(content), '\n')
+    @test lines[2] == "TATA"
+    @test length(lines[4]) == 4
+
+    rm(tmp_dir, recursive=true)
+end
