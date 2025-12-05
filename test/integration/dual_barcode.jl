@@ -2,7 +2,7 @@ using BioDemuX
 using Test
 using CodecZlib
 
-@testset "Dual Index Demultiplexing" begin
+@testset "Dual Barcode Demultiplexing" begin
     # Create temporary files
     tmp_dir = mktempdir()
 
