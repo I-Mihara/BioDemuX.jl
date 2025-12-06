@@ -184,6 +184,25 @@ execute_demultiplexing(FASTQ_file, barcode_file, output_directory; barcode_file2
 - **`barcode_end_range2::String`** (default: `"1:end"`):
   - Specifies the allowed end range for the second barcode. Format is the same as `barcode_end_range`.
 
+- **`summary::Bool`** (default: `false`):
+  - If set to `true`, a summary report is generated after demultiplexing. The report includes statistics on total reads, matched reads, unmatched reads, ambiguous reads, and detailed distributions of alignment scores, positions, and lengths for each barcode.
+
+- **`summary_format::Symbol`** (default: `:text`):
+  - Specifies the format of the summary report. Options are:
+    - `:text`: A human-readable text file (`summary.txt`).
+    - `:html`: An interactive HTML report (`summary.html`) with tabs and dropdowns for detailed visualization.
+    - `:json`: A JSON file (`summary.json`) for programmatic parsing.
+    - `:stdout`: Prints the summary to the standard output.
+
+- **`trim_side::Union{Int, Nothing}`** (default: `nothing`):
+  - Specifies which side of the read to trim relative to the barcode.
+    - `3`: Trims the 3' side (right side) of the barcode match. Keeps the sequence *before* the barcode.
+    - `5`: Trims the 5' side (left side) of the barcode match. Keeps the sequence *after* the barcode.
+  - If `nothing`, no trimming is performed.
+
+- **`trim_side2::Union{Int, Nothing}`** (default: `nothing`):
+  - Specifies trimming for the second barcode in dual-barcode mode. Options are the same as `trim_side`.
+
 ## Example: How Barcode Length and Option Values Affect Classification
 
 We assume the case where barcode length is 10, `max_error_rate ` is 0.2, `min_delta` is 0.2, `mismatch` is 1, `indel` is 2.

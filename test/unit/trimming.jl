@@ -30,7 +30,8 @@ using BioDemuX: SemiGlobalWorkspace, semiglobal_alignment, determine_filename, D
             barcode_end_range=BioDemuX.parse_dynamic_range("1:end")
         )
 
-        fname, trim_range = determine_filename(read, config, ws)
+        fname, t_start, t_end = determine_filename(read, config, ws)
+        trim_range = t_start:t_end
         @test fname == "id1.fastq"
         @test trim_range == 1:5
         @test read[trim_range] == "AAAAA"
@@ -58,7 +59,8 @@ using BioDemuX: SemiGlobalWorkspace, semiglobal_alignment, determine_filename, D
             barcode_end_range=BioDemuX.parse_dynamic_range("1:end")
         )
 
-        fname, trim_range = determine_filename(read, config, ws)
+        fname, t_start, t_end = determine_filename(read, config, ws)
+        trim_range = t_start:t_end
         @test fname == "id1.fastq"
         @test trim_range == 11:15
         @test read[trim_range] == "CCCCC"
@@ -120,7 +122,8 @@ using BioDemuX: SemiGlobalWorkspace, semiglobal_alignment, determine_filename, D
             barcode_end_range2=BioDemuX.parse_dynamic_range("1:end")
         )
 
-        fname, trim_range = determine_filename(read, config, ws)
+        fname, t_start, t_end = determine_filename(read, config, ws)
+        trim_range = t_start:t_end
         @test fname == "id1.id2.fastq"
         @test trim_range == 11:15
         @test read[trim_range] == "CCCCC"

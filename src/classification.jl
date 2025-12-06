@@ -43,6 +43,10 @@ Base.@kwdef struct DemuxConfig
     # Trimming
     trim_side::Union{Int,Nothing} = nothing
     trim_side2::Union{Int,Nothing} = nothing
+
+    # Summary
+    summary::Bool = false
+    summary_format::Symbol = :txt # :txt, :json, :html
 end
 
 function parse_part(s::String)
@@ -110,15 +114,15 @@ abstract type AbstractOutputPolicy end
 
 struct ScoreOnly <: AbstractOutputPolicy end
 
-struct TrimmingOutput <: AbstractOutputPolicy
-    trim_side::Int
+struct TracebackOutput <: AbstractOutputPolicy
+    trim_side::Union{Int,Nothing}
 end
 
 @inline function init_result(::ScoreOnly, INF_INT)
     return INF_INT
 end
 
-@inline function init_result(::TrimmingOutput, INF_INT)
+@inline function init_result(::TracebackOutput, INF_INT)
     return (INF_INT, -1, -1)
 end
 
@@ -126,13 +130,13 @@ end
     return min(current_best, new_score)
 end
 
-@inline function update_result(output::TrimmingOutput, current_best, new_score, j, start_pos)
+@inline function update_result(output::TracebackOutput, current_best, new_score, j, start_pos)
     (best_score, best_start, best_end) = current_best
 
     if new_score < best_score
         return (new_score, start_pos, j)
     elseif new_score == best_score
-        if output.trim_side == 3 && start_pos > best_start
+        if !isnothing(output.trim_side) && output.trim_side == 3 && start_pos > best_start
             return (new_score, start_pos, j)
         end
     end
@@ -146,7 +150,7 @@ end
     return result / normalization
 end
 
-@inline function finalize_result(::TrimmingOutput, result, normalization)
+@inline function finalize_result(::TracebackOutput, result, normalization)
     (score, start, end_pos) = result
     if score >= INF_INT
         return (Inf, start, end_pos)
@@ -259,12 +263,12 @@ function semiglobal_alignment_core(
     DP = ws.DP
 
     # Origin tracking setup
-    is_trimming = O <: TrimmingOutput
+    is_traceback = O <: TracebackOutput
     origin = ws.origin
 
     @inbounds for i in 1:m # Initialize the DP vector.
         DP[i] = scoring.indel * i
-        if is_trimming
+        if is_traceback
             origin[i] = 1 - i
         end
     end
@@ -290,7 +294,7 @@ function semiglobal_alignment_core(
             insertion_score, deletion_score, substitution_score = step_scores(scoring, q, r, fact, j, previous_score, DP, m, INF_INT)
 
             # Determine origin for this step
-            if is_trimming
+            if is_traceback
                 del_origin = previous_score_origin
                 sub_origin = (fact == 1 ? j : origin[fact-1])
                 ins_origin = origin[fact]
@@ -312,12 +316,12 @@ function semiglobal_alignment_core(
 
             if fact != 1
                 DP[fact-1] = previous_score
-                if is_trimming
+                if is_traceback
                     origin[fact-1] = previous_score_origin
                 end
             end
             previous_score = min(insertion_score, deletion_score, substitution_score)
-            if is_trimming
+            if is_traceback
                 previous_score_origin = current_origin
             end
 
@@ -327,7 +331,7 @@ function semiglobal_alignment_core(
             for i in (fact+1):limit
                 insertion_score, deletion_score, substitution_score = step_scores_main(scoring, q, r, i, j, previous_score, DP, m, INF_INT)
 
-                if is_trimming
+                if is_traceback
                     del_origin = previous_score_origin
                     sub_origin = origin[i-1]
                     ins_origin = origin[i]
@@ -349,12 +353,12 @@ function semiglobal_alignment_core(
                 end
 
                 DP[i-1] = previous_score
-                if is_trimming
+                if is_traceback
                     origin[i-1] = previous_score_origin
                 end
 
                 previous_score = min(insertion_score, deletion_score, substitution_score)
-                if is_trimming
+                if is_traceback
                     previous_score_origin = current_origin
                 end
             end
@@ -363,7 +367,7 @@ function semiglobal_alignment_core(
             if lact == m && lact > fact
                 insertion_score, deletion_score, substitution_score = step_scores(scoring, q, r, m, j, previous_score, DP, m, INF_INT)
 
-                if is_trimming
+                if is_traceback
                     del_origin = previous_score_origin
                     ins_origin = origin[m]
                     sub_origin = origin[m-1]
@@ -385,19 +389,19 @@ function semiglobal_alignment_core(
                 end
 
                 DP[m-1] = previous_score
-                if is_trimming
+                if is_traceback
                     origin[m-1] = previous_score_origin
                 end
 
                 previous_score = min(insertion_score, deletion_score, substitution_score)
-                if is_trimming
+                if is_traceback
                     previous_score_origin = current_origin
                 end
             end
         end
 
         DP[lact] = previous_score
-        if is_trimming
+        if is_traceback
             origin[lact] = previous_score_origin
         end
 
@@ -405,10 +409,10 @@ function semiglobal_alignment_core(
             lact -= 1
             if j >= min_end_pos
                 if previous_score == 0
-                    do_early_exit = !is_trimming || (is_trimming && output.trim_side == 5)
+                    do_early_exit = !is_traceback || (is_traceback && output.trim_side == 5)
 
                     if do_early_exit
-                        if is_trimming
+                        if is_traceback
                             return finalize_result(output, (0.0, previous_score_origin, j), normalization_length)
                         else
                             return finalize_result(output, 0.0, normalization_length)
@@ -416,7 +420,7 @@ function semiglobal_alignment_core(
                     end
                 end
 
-                if is_trimming
+                if is_traceback
                     result = update_result(output, result, previous_score, j, previous_score_origin)
                 else
                     result = update_result(output, result, previous_score, j)
@@ -431,33 +435,33 @@ function semiglobal_alignment_core(
     return finalize_result(output, result, normalization_length)
 end
 
-function semiglobal_alignment(ws::SemiGlobalWorkspace, query::String, ref::String, max_error::Float64, match::Int, mismatch::Int, indel::Int, ref_search_range::UnitRange{Int}, max_start_pos::Int, min_end_pos::Int, trim_side::Union{Int,Nothing}=nothing)
+function semiglobal_alignment(ws::SemiGlobalWorkspace, query::String, ref::String, max_error::Float64, match::Int, mismatch::Int, indel::Int, ref_search_range::UnitRange{Int}, max_start_pos::Int, min_end_pos::Int, trim_side::Union{Int,Nothing}=nothing, need_traceback::Bool=false)
     m = ncodeunits(query)
     n = ncodeunits(ref)
     q = codeunits(query)
     r = codeunits(ref)
     scoring = SimpleScoring(match, mismatch, indel)
 
-    if isnothing(trim_side)
+    if isnothing(trim_side) && !need_traceback
         output = ScoreOnly()
     else
-        output = TrimmingOutput(trim_side)
+        output = TracebackOutput(trim_side)
     end
 
     return semiglobal_alignment_core(ws, q, r, m, n, max_error, scoring, output, ref_search_range, max_start_pos, min_end_pos, m)
 end
 
-function semiglobal_alignment_N(ws::SemiGlobalWorkspace, query::String, ref::String, max_error::Float64, match::Int, mismatch::Int, indel::Int, nindel::Int, ref_search_range::UnitRange{Int}, max_start_pos::Int, min_end_pos::Int, non_N_m::Int, trim_side::Union{Int,Nothing}=nothing)
+function semiglobal_alignment_N(ws::SemiGlobalWorkspace, query::String, ref::String, max_error::Float64, match::Int, mismatch::Int, indel::Int, nindel::Int, ref_search_range::UnitRange{Int}, max_start_pos::Int, min_end_pos::Int, non_N_m::Int, trim_side::Union{Int,Nothing}=nothing, need_traceback::Bool=false)
     m = ncodeunits(query)
     n = ncodeunits(ref)
     q = codeunits(query)
     r = codeunits(ref)
     scoring = NScoring(match, mismatch, indel, nindel)
 
-    if isnothing(trim_side)
+    if isnothing(trim_side) && !need_traceback
         output = ScoreOnly()
     else
-        output = TrimmingOutput(trim_side)
+        output = TracebackOutput(trim_side)
     end
 
     return semiglobal_alignment_core(ws, q, r, m, n, max_error, scoring, output, ref_search_range, max_start_pos, min_end_pos, non_N_m)
@@ -466,9 +470,9 @@ end
 """
 Calculate and compare the similarity of a given sequence seq with the sequences in the given DataFrame bc_df.
 # Returns
-A tuple `(min_score_bc, delta)`, where `min_score_bc` is the index of the best matching sequence in `bc_df`, and `delta` is the difference between the lowest and second-lowest scores.
+A tuple `(min_score_bc, min_score, delta, best_start, best_end)`.
 """
-function find_best_matching_bc_no_delta(seq::String, bc_seqs::Vector{String}, bc_lengths_no_N::Vector{Int}, ws::SemiGlobalWorkspace, max_error_rate::Float64, match::Int, mismatch::Int, indel::Int, nindel::Union{Int,Nothing}, ref_search_range::UnitRange{Int}, max_start_pos::Int, min_end_pos::Int, trim_side::Union{Int,Nothing})
+function find_best_matching_bc_no_delta(seq::String, bc_seqs::Vector{String}, bc_lengths_no_N::Vector{Int}, ws::SemiGlobalWorkspace, max_error_rate::Float64, match::Int, mismatch::Int, indel::Int, nindel::Union{Int,Nothing}, ref_search_range::UnitRange{Int}, max_start_pos::Int, min_end_pos::Int, trim_side::Union{Int,Nothing}, need_traceback::Bool)
     min_score = Inf
     min_score_bc = 0
     best_start = -1
@@ -476,12 +480,12 @@ function find_best_matching_bc_no_delta(seq::String, bc_seqs::Vector{String}, bc
 
     @inbounds for (i, bc) in pairs(bc_seqs)
         if isnothing(nindel)
-            alignment_result = semiglobal_alignment(ws, bc, seq, max_error_rate, match, mismatch, indel, ref_search_range, max_start_pos, min_end_pos, trim_side)
+            alignment_result = semiglobal_alignment(ws, bc, seq, max_error_rate, match, mismatch, indel, ref_search_range, max_start_pos, min_end_pos, trim_side, need_traceback)
         else
-            alignment_result = semiglobal_alignment_N(ws, bc, seq, max_error_rate, match, mismatch, indel, nindel, ref_search_range, max_start_pos, min_end_pos, bc_lengths_no_N[i], trim_side)
+            alignment_result = semiglobal_alignment_N(ws, bc, seq, max_error_rate, match, mismatch, indel, nindel, ref_search_range, max_start_pos, min_end_pos, bc_lengths_no_N[i], trim_side, need_traceback)
         end
 
-        if isnothing(trim_side)
+        if isnothing(trim_side) && !need_traceback
             score = alignment_result
             s, e = -1, -1
         else
@@ -496,10 +500,10 @@ function find_best_matching_bc_no_delta(seq::String, bc_seqs::Vector{String}, bc
             best_end = e
         end
     end
-    return min_score_bc, Inf, best_start, best_end
+    return min_score_bc, min_score, Inf, best_start, best_end
 end
 
-function find_best_matching_bc_with_delta(seq::String, bc_seqs::Vector{String}, bc_lengths_no_N::Vector{Int}, ws::SemiGlobalWorkspace, max_error_rate::Float64, match::Int, mismatch::Int, indel::Int, nindel::Union{Int,Nothing}, ref_search_range::UnitRange{Int}, max_start_pos::Int, min_end_pos::Int, trim_side::Union{Int,Nothing})
+function find_best_matching_bc_with_delta(seq::String, bc_seqs::Vector{String}, bc_lengths_no_N::Vector{Int}, ws::SemiGlobalWorkspace, max_error_rate::Float64, match::Int, mismatch::Int, indel::Int, nindel::Union{Int,Nothing}, ref_search_range::UnitRange{Int}, max_start_pos::Int, min_end_pos::Int, trim_side::Union{Int,Nothing}, need_traceback::Bool)
     min_score = Inf
     sub_min_score = Inf
     min_score_bc = 0
@@ -508,12 +512,12 @@ function find_best_matching_bc_with_delta(seq::String, bc_seqs::Vector{String}, 
 
     @inbounds for (i, bc) in pairs(bc_seqs)
         if isnothing(nindel)
-            alignment_result = semiglobal_alignment(ws, bc, seq, max_error_rate, match, mismatch, indel, ref_search_range, max_start_pos, min_end_pos, trim_side)
+            alignment_result = semiglobal_alignment(ws, bc, seq, max_error_rate, match, mismatch, indel, ref_search_range, max_start_pos, min_end_pos, trim_side, need_traceback)
         else
-            alignment_result = semiglobal_alignment_N(ws, bc, seq, max_error_rate, match, mismatch, indel, nindel, ref_search_range, max_start_pos, min_end_pos, bc_lengths_no_N[i], trim_side)
+            alignment_result = semiglobal_alignment_N(ws, bc, seq, max_error_rate, match, mismatch, indel, nindel, ref_search_range, max_start_pos, min_end_pos, bc_lengths_no_N[i], trim_side, need_traceback)
         end
 
-        if isnothing(trim_side)
+        if isnothing(trim_side) && !need_traceback
             score = alignment_result
             s, e = -1, -1
         else
@@ -536,21 +540,21 @@ function find_best_matching_bc_with_delta(seq::String, bc_seqs::Vector{String}, 
         end
     end
     delta = sub_min_score - min_score
-    return min_score_bc, delta, best_start, best_end
+    return min_score_bc, min_score, delta, best_start, best_end
 end
 
 """
 Calculate and compare the similarity of a given sequence seq with the sequences in the given DataFrame bc_df.
 # Returns
-A tuple `(min_score_bc, delta)`, where `min_score_bc` is the index of the best matching sequence in `bc_df`, and `delta` is the difference between the lowest and second-lowest scores.
+A tuple `(min_score_bc, min_score, delta, best_start, best_end)`.
 """
 
 
-function find_best_matching_bc(seq::String, bc_seqs::Vector{String}, bc_lengths_no_N::Vector{Int}, config::DemuxConfig, ws::SemiGlobalWorkspace, ref_search_range::UnitRange{Int}, max_start_pos::Int, min_end_pos::Int, trim_side::Union{Int,Nothing})
+function find_best_matching_bc(seq::String, bc_seqs::Vector{String}, bc_lengths_no_N::Vector{Int}, config::DemuxConfig, ws::SemiGlobalWorkspace, ref_search_range::UnitRange{Int}, max_start_pos::Int, min_end_pos::Int, trim_side::Union{Int,Nothing}, need_traceback::Bool=false)
     if config.min_delta == 0.0
-        return find_best_matching_bc_no_delta(seq, bc_seqs, bc_lengths_no_N, ws, config.max_error_rate, config.match, config.mismatch, config.indel, config.nindel, ref_search_range, max_start_pos, min_end_pos, trim_side)
+        return find_best_matching_bc_no_delta(seq, bc_seqs, bc_lengths_no_N, ws, config.max_error_rate, config.match, config.mismatch, config.indel, config.nindel, ref_search_range, max_start_pos, min_end_pos, trim_side, need_traceback)
     else
-        return find_best_matching_bc_with_delta(seq, bc_seqs, bc_lengths_no_N, ws, config.max_error_rate, config.match, config.mismatch, config.indel, config.nindel, ref_search_range, max_start_pos, min_end_pos, trim_side)
+        return find_best_matching_bc_with_delta(seq, bc_seqs, bc_lengths_no_N, ws, config.max_error_rate, config.match, config.mismatch, config.indel, config.nindel, ref_search_range, max_start_pos, min_end_pos, trim_side, need_traceback)
     end
 end
 
@@ -570,17 +574,17 @@ function determine_filename(seq::String, config::DemuxConfig, ws::SemiGlobalWork
     min_end_pos1 = first(barcode_end_range1)
 
     if start_j1 > end_j1 || start_j1 > max_start_pos1 || end_j1 < min_end_pos1
-        return "unknown.fastq", nothing
+        return "unknown.fastq", -1, -1
     end
 
     ref_search_range1 = start_j1:end_j1
 
-    min_score_bc1, delta1, best_start1, best_end1 = find_best_matching_bc(seq, config.bc_seqs, config.bc_lengths_no_N, config, ws, ref_search_range1, max_start_pos1, min_end_pos1, config.trim_side)
+    min_score_bc1, score1, delta1, best_start1, best_end1 = find_best_matching_bc(seq, config.bc_seqs, config.bc_lengths_no_N, config, ws, ref_search_range1, max_start_pos1, min_end_pos1, config.trim_side)
 
     if min_score_bc1 == 0
-        return "unknown.fastq", nothing
+        return "unknown.fastq", -1, -1
     elseif delta1 < config.min_delta
-        return "ambiguous_classification.fastq", nothing
+        return "ambiguous_classification.fastq", -1, -1
     end
 
     # --- Pass 2: Barcode 2 (if dual) ---
@@ -596,17 +600,17 @@ function determine_filename(seq::String, config::DemuxConfig, ws::SemiGlobalWork
         min_end_pos2 = first(barcode_end_range2)
 
         if start_j2 > end_j2 || start_j2 > max_start_pos2 || end_j2 < min_end_pos2
-            return "unknown.fastq", nothing
+            return "unknown.fastq", -1, -1
         end
 
         ref_search_range2 = start_j2:end_j2
 
-        min_score_bc2, delta2, best_start2, best_end2 = find_best_matching_bc(seq, config.bc_seqs2, config.bc_lengths_no_N2, config, ws, ref_search_range2, max_start_pos2, min_end_pos2, config.trim_side2)
+        min_score_bc2, score2, delta2, best_start2, best_end2 = find_best_matching_bc(seq, config.bc_seqs2, config.bc_lengths_no_N2, config, ws, ref_search_range2, max_start_pos2, min_end_pos2, config.trim_side2)
 
         if min_score_bc2 == 0
-            return "unknown.fastq", nothing
+            return "unknown.fastq", -1, -1
         elseif delta2 < config.min_delta
-            return "ambiguous_classification.fastq", nothing
+            return "ambiguous_classification.fastq", -1, -1
         end
 
         # Combine IDs
@@ -616,10 +620,10 @@ function determine_filename(seq::String, config::DemuxConfig, ws::SemiGlobalWork
         output_filename = string(config.ids[min_score_bc1]) * ".fastq"
     end
 
-    trim_range = nothing
+    trim_range = -1:-1
 
     # Calculate trim range for BC1
-    trim_range1 = nothing
+    trim_range1 = -1:-1
     if !isnothing(config.trim_side)
         if config.trim_side == 3
             safe_start = max(1, best_start1)
@@ -630,7 +634,7 @@ function determine_filename(seq::String, config::DemuxConfig, ws::SemiGlobalWork
     end
 
     # Calculate trim range for BC2 (if dual)
-    trim_range2 = nothing
+    trim_range2 = -1:-1
     if config.is_dual && !isnothing(config.trim_side2)
         if config.trim_side2 == 3
             safe_start2 = max(1, best_start2)
@@ -641,17 +645,52 @@ function determine_filename(seq::String, config::DemuxConfig, ws::SemiGlobalWork
     end
 
     # Combine trim ranges
-    if !isnothing(trim_range1) && !isnothing(trim_range2)
+    if first(trim_range1) != -1 && first(trim_range2) != -1
         trim_range = intersect(trim_range1, trim_range2)
-    elseif !isnothing(trim_range1)
+    elseif first(trim_range1) != -1
         trim_range = trim_range1
-    elseif !isnothing(trim_range2)
+    elseif first(trim_range2) != -1
         trim_range = trim_range2
     end
 
     if config.gzip_output
-        return output_filename * ".gz", trim_range
+        return output_filename * ".gz", first(trim_range), last(trim_range)
     else
-        return output_filename, trim_range
+        return output_filename, first(trim_range), last(trim_range)
     end
+end
+
+
+
+mutable struct DemuxStats
+    total_reads::Int
+    matched_reads::Int
+    unmatched_reads::Int
+    ambiguous_reads::Int
+
+    # Key: (bc1_idx, bc2_idx). bc2_idx=0 if single.
+    sample_counts::Dict{Tuple{Int,Int},Int}
+
+    bc1_pos_counts::Dict{Int,Int}
+    bc1_len_counts::Dict{Int,Int}
+    bc1_score_counts::Dict{Float64,Int}
+    bc1_per_bc_score_counts::Dict{Int,Dict{Float64,Int}}
+    bc1_per_bc_pos_counts::Dict{Int,Dict{Int,Int}}
+    bc1_per_bc_len_counts::Dict{Int,Dict{Int,Int}}
+
+    bc2_pos_counts::Dict{Int,Int}
+    bc2_len_counts::Dict{Int,Int}
+    bc2_score_counts::Dict{Float64,Int}
+    bc2_per_bc_score_counts::Dict{Int,Dict{Float64,Int}}
+    bc2_per_bc_pos_counts::Dict{Int,Dict{Int,Int}}
+    bc2_per_bc_len_counts::Dict{Int,Dict{Int,Int}}
+end
+
+function DemuxStats()
+    DemuxStats(
+        0, 0, 0, 0,
+        Dict{Tuple{Int,Int},Int}(),
+        Dict{Int,Int}(), Dict{Int,Int}(), Dict{Float64,Int}(), Dict{Int,Dict{Float64,Int}}(), Dict{Int,Dict{Int,Int}}(), Dict{Int,Dict{Int,Int}}(),
+        Dict{Int,Int}(), Dict{Int,Int}(), Dict{Float64,Int}(), Dict{Int,Dict{Float64,Int}}(), Dict{Int,Dict{Int,Int}}(), Dict{Int,Dict{Int,Int}}()
+    )
 end

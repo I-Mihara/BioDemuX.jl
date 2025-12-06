@@ -14,6 +14,8 @@ println("Running tests with $(Threads.nthreads()) threads")
 @testset "Integration Tests (Current Process)" begin
     include("integration/single_barcode.jl")
     include("integration/dual_barcode.jl")
+    include("integration/summary_mode.jl")
+    include("integration/summary_distributions.jl")
 end
 
 if Threads.nthreads() == 1
