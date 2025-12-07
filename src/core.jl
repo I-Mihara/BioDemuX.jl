@@ -302,7 +302,7 @@ function execute_demultiplexing(
     trim_side::Union{Int,Nothing}=nothing,
     trim_side2::Union{Int,Nothing}=nothing,
     summary::Bool=false,
-    summary_format::Symbol=:txt
+    summary_format::Symbol=:html
 )
 
     # Validate trim_side
@@ -451,7 +451,7 @@ function execute_demultiplexing(
     trim_side::Union{Int,Nothing}=nothing,
     trim_side2::Union{Int,Nothing}=nothing,
     summary::Bool=false,
-    summary_format::Symbol=:txt
+    summary_format::Symbol=:html
 )
 
     # Validate trim_side
