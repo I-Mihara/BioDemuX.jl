@@ -111,32 +111,6 @@ struct ResultChunk
     trim_ranges::Union{Vector{Union{UnitRange{Int},Nothing}},Nothing}
 end
 
-function worker_task(input_channel::Channel{Chunk}, output_channel::Channel{ResultChunk}, config::DemuxConfig)
-    # Create thread-local workspace
-    max_m = maximum(ncodeunits.(config.bc_seqs))
-    if config.is_dual && !isempty(config.bc_seqs2)
-        max_m = max(max_m, maximum(ncodeunits.(config.bc_seqs2)))
-    end
-    ws = SemiGlobalWorkspace(max_m, !isnothing(config.trim_side) || !isnothing(config.trim_side2))
-    for chunk in input_channel
-        n = length(chunk.data.headers)
-        filenames = Vector{String}(undef, n)
-        do_trim = !isnothing(config.trim_side) || !isnothing(config.trim_side2)
-        trim_ranges = do_trim ? Vector{Union{UnitRange{Int},Nothing}}(undef, n) : nothing
-
-        for i in 1:n
-            seq = chunk.data.seqs[i]
-            filename, trim_range = determine_filename(seq, config, ws)
-            filenames[i] = filename
-            if !isnothing(trim_ranges)
-                trim_ranges[i] = trim_range
-            end
-        end
-
-        put!(output_channel, ResultChunk(chunk, filenames, trim_ranges))
-    end
-end
-
 function writer_task(output_channel::Channel{ResultChunk}, recycle_channel::Channel{Chunk}, output_dir::String, output_prefix1::String, output_prefix2::String, config::DemuxConfig)
     # Dictionary to keep track of open file handles
     file_handles = Dict{String,BufferedOutputStream}()
@@ -158,7 +132,7 @@ function writer_task(output_channel::Channel{ResultChunk}, recycle_channel::Chan
     # Buffer for reordering chunks
     pending_chunks = Dict{Int,ResultChunk}()
     next_chunk_id = 1
-
+    # Loop over results
     for result_chunk in output_channel
         pending_chunks[result_chunk.chunk.id] = result_chunk
 
@@ -244,6 +218,61 @@ function writer_task(output_channel::Channel{ResultChunk}, recycle_channel::Chan
     end
 end
 
+function worker_task(input_channel::Channel{Chunk}, output_channel::Channel{ResultChunk}, config::DemuxConfig; stats::Union{DemuxStats,Nothing}=nothing)
+    # Initialize workspace
+    # Create thread-local workspace
+    max_m = maximum(ncodeunits.(config.bc_seqs))
+    if config.is_dual && !isempty(config.bc_seqs2)
+        max_m = max(max_m, maximum(ncodeunits.(config.bc_seqs2)))
+    end
+    ws = SemiGlobalWorkspace(max_m, !isnothing(stats) || !isnothing(config.trim_side) || !isnothing(config.trim_side2))
+
+    for chunk in input_channel
+        try
+            n = length(chunk.data.headers)
+            filenames = Vector{String}(undef, n)
+
+            do_trim = !isnothing(config.trim_side) || !isnothing(config.trim_side2)
+            trim_ranges = do_trim ? Vector{Union{UnitRange{Int},Nothing}}(undef, n) : nothing
+
+            for i in 1:n
+                read1 = chunk.data.seqs[i]
+
+                if !isnothing(stats)
+                    filename, t_start, t_end = determine_filename_and_stats(read1, config, ws, stats)
+                    filenames[i] = filename
+                    if !isnothing(trim_ranges)
+                        if t_start != -1
+                            trim_ranges[i] = t_start:t_end
+                        else
+                            trim_ranges[i] = nothing
+                        end
+                    end
+                else
+                    filename, t_start, t_end = determine_filename(read1, config, ws)
+                    filenames[i] = filename
+                    if !isnothing(trim_ranges)
+                        if t_start != -1
+                            trim_ranges[i] = t_start:t_end
+                        else
+                            trim_ranges[i] = nothing
+                        end
+                    end
+                end
+            end
+
+            put!(output_channel, ResultChunk(chunk, filenames, trim_ranges))
+        catch e
+            if isa(e, InvalidStateException)
+                break
+            else
+                rethrow(e)
+            end
+        end
+    end
+    return stats
+end
+
 function execute_demultiplexing(
     FASTQ_file1::String,
     FASTQ_file2::String,
@@ -270,7 +299,10 @@ function execute_demultiplexing(
     barcode_end_range2::String="1:end",
     chunk_size::Int=4000,
     channel_capacity::Int=64,
-    trim_side::Union{Int,Nothing}=nothing
+    trim_side::Union{Int,Nothing}=nothing,
+    trim_side2::Union{Int,Nothing}=nothing,
+    summary::Bool=false,
+    summary_format::Symbol=:html
 )
 
     # Validate trim_side
@@ -327,7 +359,10 @@ function execute_demultiplexing(
         bc_seqs2=bc_seqs2,
         bc_lengths_no_N2=bc_lengths_no_N2,
         ids2=ids2,
-        trim_side=trim_side
+        trim_side=trim_side,
+        trim_side2=trim_side2,
+        summary=summary,
+        summary_format=summary_format
     )
 
     # Channels
@@ -341,26 +376,53 @@ function execute_demultiplexing(
     reader = Threads.@spawn begin
         try
             reader_task(input_channel, recycle_channel, FASTQ_file1, FASTQ_file2, chunk_size)
+        catch e
+            println(stderr, "Reader task failed: ", e)
+            showerror(stderr, e, catch_backtrace())
+            rethrow(e)
         finally
             close(input_channel)
         end
     end
 
     # Workers
-    workers = [Threads.@spawn worker_task(input_channel, output_channel, config) for _ in 1:Threads.nthreads()]
+    workers = Vector{Task}(undef, Threads.nthreads())
+    for i in 1:Threads.nthreads()
+        workers[i] = Threads.@spawn begin
+            try
+                stats = config.summary ? DemuxStats() : nothing
+                worker_task(input_channel, output_channel, config; stats=stats)
+            catch e
+                println(stderr, "Worker task failed: ", e)
+                showerror(stderr, e, catch_backtrace())
+                rethrow(e)
+            end
+        end
+    end
 
     # Monitor workers
-    Threads.@spawn begin
+    monitor = Threads.@spawn begin
+        stats_list = DemuxStats[]
         for w in workers
-            wait(w)
+            res = fetch(w)
+            if config.summary
+                push!(stats_list, res)
+            end
         end
         close(output_channel)
+        return stats_list
     end
 
     # Writer
     writer = Threads.@spawn writer_task(output_channel, recycle_channel, output_directory, output_prefix1, output_prefix2, config)
 
     wait(writer)
+
+    if config.summary
+        stats_list = fetch(monitor)
+        merged_stats = merge_stats(stats_list)
+        generate_summary_report(merged_stats, config, output_directory, FASTQ_file1, barcode_file, FASTQ_file2, barcode_file2; bc_complement=bc_complement, bc_rev=bc_rev, trim_side=trim_side, trim_side2=trim_side2)
+    end
 end
 
 function execute_demultiplexing(
@@ -387,7 +449,9 @@ function execute_demultiplexing(
     chunk_size::Int=4000,
     channel_capacity::Int=64,
     trim_side::Union{Int,Nothing}=nothing,
-    trim_side2::Union{Int,Nothing}=nothing
+    trim_side2::Union{Int,Nothing}=nothing,
+    summary::Bool=false,
+    summary_format::Symbol=:html
 )
 
     # Validate trim_side
@@ -445,7 +509,9 @@ function execute_demultiplexing(
         bc_lengths_no_N2=bc_lengths_no_N2,
         ids2=ids2,
         trim_side=trim_side,
-        trim_side2=trim_side2
+        trim_side2=trim_side2,
+        summary=summary,
+        summary_format=summary_format
     )
 
     # Channels
@@ -459,24 +525,52 @@ function execute_demultiplexing(
     reader = Threads.@spawn begin
         try
             reader_task(input_channel, recycle_channel, FASTQ_file, nothing, chunk_size)
+        catch e
+            println(stderr, "Reader task failed: ", e)
+            showerror(stderr, e, catch_backtrace())
+            rethrow(e)
         finally
             close(input_channel)
         end
     end
 
     # Workers
-    workers = [Threads.@spawn worker_task(input_channel, output_channel, config) for _ in 1:Threads.nthreads()]
+    # Workers
+    workers = Vector{Task}(undef, Threads.nthreads())
+    for i in 1:Threads.nthreads()
+        workers[i] = Threads.@spawn begin
+            try
+                stats = config.summary ? DemuxStats() : nothing
+                worker_task(input_channel, output_channel, config; stats=stats)
+            catch e
+                println(stderr, "Worker task failed: ", e)
+                showerror(stderr, e, catch_backtrace())
+                rethrow(e)
+            end
+        end
+    end
 
     # Monitor workers
-    Threads.@spawn begin
+    monitor = Threads.@spawn begin
+        stats_list = DemuxStats[]
         for w in workers
-            wait(w)
+            res = fetch(w)
+            if config.summary
+                push!(stats_list, res)
+            end
         end
         close(output_channel)
+        return stats_list
     end
 
     # Writer
     writer = Threads.@spawn writer_task(output_channel, recycle_channel, output_directory, output_prefix, "", config)
 
     wait(writer)
+
+    if config.summary
+        stats_list = fetch(monitor)
+        merged_stats = merge_stats(stats_list)
+        generate_summary_report(merged_stats, config, output_directory, FASTQ_file, barcode_file, nothing, barcode_file2; bc_complement=bc_complement, bc_rev=bc_rev, trim_side=trim_side, trim_side2=trim_side2)
+    end
 end
