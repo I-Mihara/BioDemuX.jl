@@ -187,7 +187,7 @@ execute_demultiplexing(FASTQ_file, barcode_file, output_directory; barcode_file2
 - **`summary::Bool`** (default: `false`):
   - If set to `true`, a summary report is generated after demultiplexing. The report includes statistics on total reads, matched reads, unmatched reads, ambiguous reads, and detailed distributions of alignment scores, positions, and lengths for each barcode.
 
-- **`summary_format::Symbol`** (default: `:text`):
+- **`summary_format::Symbol`** (default: `:html`):
   - Specifies the format of the summary report. Options are:
     - `:text`: A human-readable text file (`summary.txt`).
     - `:html`: An interactive HTML report (`summary.html`) with tabs and dropdowns for detailed visualization.
