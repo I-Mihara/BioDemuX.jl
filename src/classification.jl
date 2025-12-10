@@ -472,6 +472,77 @@ function semiglobal_alignment_N(ws::SemiGlobalWorkspace, query::String, ref::Str
 end
 
 """
+Aligns `query` to `ref` using exact string matching (byte-by-byte comparison).
+No indels or mismatches allowed.
+We scan `query` across `ref_search_range` in `ref`.
+Returns `(0.0, start_pos, end_pos)` if found, otherwise `(Inf, -1, -1)`.
+"""
+function exact_align(query::String, ref::String, ref_search_range::UnitRange{Int}, max_start_pos::Int, min_end_pos::Int, trim_side::Union{Int,Nothing})
+    m = ncodeunits(query)
+    n = ncodeunits(ref)
+
+    # Reference range constraint
+    start_range_first = max(first(ref_search_range), 1)
+    start_range_last = min(last(ref_search_range), max_start_pos, n - m + 1)
+
+    if start_range_last < start_range_first
+        return (Inf, -1, -1)
+    end
+
+    # If trim_side == 3, we prefer rightmost -> findprev
+    # Search backward from the LAST possible character of the match (start_range_last + m - 1)
+    if !isnothing(trim_side) && trim_side == 3
+        # findprev(query, ref, last_idx) finds match starting at or before last_idx
+        # We need the match to start at or before start_range_last.
+        # However, findprev returns range of the match.
+        # If we use `start_range_last + m - 1` as the limit, findprev guarantees the match ends at or before that limit (if searching strict match).
+
+        range = findprev(query, ref, start_range_last + m - 1)
+        if !isnothing(range)
+            s = first(range)
+            if s >= start_range_first
+                # Check min_end_pos constraint
+                if (s + m - 1) >= min_end_pos
+                    return (0.0, s, s + m - 1)
+                end
+            end
+        end
+        return (Inf, -1, -1)
+
+    else
+        # Prefer leftmost (default) -> findnext
+        range = findnext(query, ref, start_range_first)
+        if !isnothing(range)
+            s = first(range)
+            if s <= start_range_last
+                # Check min_end_pos constraint
+                if (s + m - 1) >= min_end_pos
+                    return (0.0, s, s + m - 1)
+                else
+                    # Match found but ends too early. Continue scan.
+                    next_search = s + 1
+                    while next_search <= start_range_last
+                        range = findnext(query, ref, next_search)
+                        if isnothing(range)
+                            break
+                        end
+                        s = first(range)
+                        if s > start_range_last
+                            break
+                        end
+                        if (s + m - 1) >= min_end_pos
+                            return (0.0, s, s + m - 1)
+                        end
+                        next_search = s + 1
+                    end
+                end
+            end
+        end
+        return (Inf, -1, -1)
+    end
+end
+
+"""
 Aligns `query` to `ref` using Hamming distance.
 Indels are NOT allowed (distance = infinity if lengths differ in an alignment context, but here we scan).
 We scan `query` across `ref_search_range` in `ref`.
@@ -562,6 +633,8 @@ function find_best_matching_bc_no_delta(seq::String, bc_seqs::Vector{String}, bc
     @inbounds for (i, bc) in pairs(bc_seqs)
         if matching_algorithm == :hamming
             alignment_result = hamming_align(bc, seq, max_error_rate, ref_search_range, max_start_pos, min_end_pos, trim_side)
+        elseif matching_algorithm == :exact
+            alignment_result = exact_align(bc, seq, ref_search_range, max_start_pos, min_end_pos, trim_side)
         else
             if isnothing(nindel)
                 alignment_result = semiglobal_alignment(ws, bc, seq, max_error_rate, match, mismatch, indel, ref_search_range, max_start_pos, min_end_pos, trim_side, need_traceback)
@@ -570,7 +643,7 @@ function find_best_matching_bc_no_delta(seq::String, bc_seqs::Vector{String}, bc
             end
         end
 
-        if isnothing(trim_side) && !need_traceback && matching_algorithm != :hamming
+        if isnothing(trim_side) && !need_traceback && matching_algorithm != :hamming && matching_algorithm != :exact
             score = alignment_result
             s, e = -1, -1
         else
@@ -598,6 +671,8 @@ function find_best_matching_bc_with_delta(seq::String, bc_seqs::Vector{String}, 
     @inbounds for (i, bc) in pairs(bc_seqs)
         if matching_algorithm == :hamming
             (score, s, e) = hamming_align(bc, seq, max_error_rate, ref_search_range, max_start_pos, min_end_pos, trim_side)
+        elseif matching_algorithm == :exact
+            (score, s, e) = exact_align(bc, seq, ref_search_range, max_start_pos, min_end_pos, trim_side)
         else
             if isnothing(nindel)
                 alignment_result = semiglobal_alignment(ws, bc, seq, max_error_rate, match, mismatch, indel, ref_search_range, max_start_pos, min_end_pos, trim_side, need_traceback)

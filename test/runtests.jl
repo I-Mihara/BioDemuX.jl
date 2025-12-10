@@ -8,6 +8,7 @@ include("common.jl")
     include("unit/alignment.jl")
     include("unit/trimming.jl")
     include("unit/hamming.jl")
+    include("unit/exact.jl")
 end
 
 println("Running tests with $(Threads.nthreads()) threads")
@@ -19,6 +20,7 @@ println("Running tests with $(Threads.nthreads()) threads")
 
     include("integration/summary_distributions.jl")
     include("integration/hamming_demux.jl")
+    include("integration/exact_demux.jl")
 end
 
 if Threads.nthreads() == 1
