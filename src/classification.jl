@@ -47,7 +47,11 @@ Base.@kwdef struct DemuxConfig
     # Summary
     summary::Bool = false
     summary_format::Symbol = :txt # :txt, :json, :html
+
+    # Matching Strategy
+    matching_algorithm::Symbol = :semiglobal # :semiglobal, :hamming
 end
+
 
 function parse_part(s::String)
     s = strip(s)
@@ -468,24 +472,105 @@ function semiglobal_alignment_N(ws::SemiGlobalWorkspace, query::String, ref::Str
 end
 
 """
+Aligns `query` to `ref` using Hamming distance.
+Indels are NOT allowed (distance = infinity if lengths differ in an alignment context, but here we scan).
+We scan `query` across `ref_search_range` in `ref`.
+`N` in `query` matches anything. `N` in `ref` matches only `N` in `query`.
+Returns `(score, start_pos, end_pos)`.
+"""
+function hamming_align(query::String, ref::String, max_error_rate::Float64, ref_search_range::UnitRange{Int}, max_start_pos::Int, min_end_pos::Int, trim_side::Union{Int,Nothing})
+    m = ncodeunits(query)
+    n = ncodeunits(ref)
+
+    # Pre-calculate best score tracking
+    best_score = Inf
+    best_start = -1
+    best_end = -1
+
+    # allowed max errors count (floor)
+    allowed_errors = floor(Int, max_error_rate * m)
+
+    # Reference range constraint
+    start_range_first = max(first(ref_search_range), 1)
+    start_range_last = min(last(ref_search_range), max_start_pos, n - m + 1)
+
+    if start_range_last < start_range_first
+        # No valid start position
+        return (Inf, -1, -1)
+    end
+
+    q_bytes = codeunits(query)
+    r_bytes = codeunits(ref)
+
+    @inbounds for j in start_range_first:start_range_last
+        # Check end pos constraint
+        end_pos = j + m - 1
+        if end_pos < min_end_pos
+            continue
+        end
+
+        current_mismatches = 0
+        match_failed = false
+
+        # Inner loop - scan the barcode
+        for k in 0:(m-1)
+            q_char = q_bytes[k+1]
+            r_char = r_bytes[j+k]
+
+            # Match if equal OR query is 'N' (wildcard)
+            if q_char != r_char && q_char != 0x4E # 'N'
+                current_mismatches += 1
+                if current_mismatches > allowed_errors
+                    match_failed = true
+                    break
+                end
+            end
+        end
+
+        if !match_failed
+            score = current_mismatches / m
+
+            if score < best_score
+                best_score = score
+                best_start = j
+                best_end = end_pos
+            elseif score == best_score
+                if !isnothing(trim_side) && trim_side == 3
+                    if j > best_start
+                        best_start = j
+                        best_end = end_pos
+                    end
+                end
+            end
+        end
+    end
+
+    return (best_score, best_start, best_end)
+end
+
+"""
 Calculate and compare the similarity of a given sequence seq with the sequences in the given DataFrame bc_df.
 # Returns
 A tuple `(min_score_bc, min_score, delta, best_start, best_end)`.
 """
-function find_best_matching_bc_no_delta(seq::String, bc_seqs::Vector{String}, bc_lengths_no_N::Vector{Int}, ws::SemiGlobalWorkspace, max_error_rate::Float64, match::Int, mismatch::Int, indel::Int, nindel::Union{Int,Nothing}, ref_search_range::UnitRange{Int}, max_start_pos::Int, min_end_pos::Int, trim_side::Union{Int,Nothing}, need_traceback::Bool)
+function find_best_matching_bc_no_delta(seq::String, bc_seqs::Vector{String}, bc_lengths_no_N::Vector{Int}, ws::SemiGlobalWorkspace, matching_algorithm::Symbol, max_error_rate::Float64, match::Int, mismatch::Int, indel::Int, nindel::Union{Int,Nothing}, ref_search_range::UnitRange{Int}, max_start_pos::Int, min_end_pos::Int, trim_side::Union{Int,Nothing}, need_traceback::Bool)
     min_score = Inf
     min_score_bc = 0
     best_start = -1
     best_end = -1
 
     @inbounds for (i, bc) in pairs(bc_seqs)
-        if isnothing(nindel)
-            alignment_result = semiglobal_alignment(ws, bc, seq, max_error_rate, match, mismatch, indel, ref_search_range, max_start_pos, min_end_pos, trim_side, need_traceback)
+        if matching_algorithm == :hamming
+            alignment_result = hamming_align(bc, seq, max_error_rate, ref_search_range, max_start_pos, min_end_pos, trim_side)
         else
-            alignment_result = semiglobal_alignment_N(ws, bc, seq, max_error_rate, match, mismatch, indel, nindel, ref_search_range, max_start_pos, min_end_pos, bc_lengths_no_N[i], trim_side, need_traceback)
+            if isnothing(nindel)
+                alignment_result = semiglobal_alignment(ws, bc, seq, max_error_rate, match, mismatch, indel, ref_search_range, max_start_pos, min_end_pos, trim_side, need_traceback)
+            else
+                alignment_result = semiglobal_alignment_N(ws, bc, seq, max_error_rate, match, mismatch, indel, nindel, ref_search_range, max_start_pos, min_end_pos, bc_lengths_no_N[i], trim_side, need_traceback)
+            end
         end
 
-        if isnothing(trim_side) && !need_traceback
+        if isnothing(trim_side) && !need_traceback && matching_algorithm != :hamming
             score = alignment_result
             s, e = -1, -1
         else
@@ -503,7 +588,7 @@ function find_best_matching_bc_no_delta(seq::String, bc_seqs::Vector{String}, bc
     return min_score_bc, min_score, Inf, best_start, best_end
 end
 
-function find_best_matching_bc_with_delta(seq::String, bc_seqs::Vector{String}, bc_lengths_no_N::Vector{Int}, ws::SemiGlobalWorkspace, max_error_rate::Float64, match::Int, mismatch::Int, indel::Int, nindel::Union{Int,Nothing}, ref_search_range::UnitRange{Int}, max_start_pos::Int, min_end_pos::Int, trim_side::Union{Int,Nothing}, need_traceback::Bool)
+function find_best_matching_bc_with_delta(seq::String, bc_seqs::Vector{String}, bc_lengths_no_N::Vector{Int}, ws::SemiGlobalWorkspace, matching_algorithm::Symbol, max_error_rate::Float64, match::Int, mismatch::Int, indel::Int, nindel::Union{Int,Nothing}, ref_search_range::UnitRange{Int}, max_start_pos::Int, min_end_pos::Int, trim_side::Union{Int,Nothing}, need_traceback::Bool)
     min_score = Inf
     sub_min_score = Inf
     min_score_bc = 0
@@ -511,17 +596,21 @@ function find_best_matching_bc_with_delta(seq::String, bc_seqs::Vector{String}, 
     best_end = -1
 
     @inbounds for (i, bc) in pairs(bc_seqs)
-        if isnothing(nindel)
-            alignment_result = semiglobal_alignment(ws, bc, seq, max_error_rate, match, mismatch, indel, ref_search_range, max_start_pos, min_end_pos, trim_side, need_traceback)
+        if matching_algorithm == :hamming
+            (score, s, e) = hamming_align(bc, seq, max_error_rate, ref_search_range, max_start_pos, min_end_pos, trim_side)
         else
-            alignment_result = semiglobal_alignment_N(ws, bc, seq, max_error_rate, match, mismatch, indel, nindel, ref_search_range, max_start_pos, min_end_pos, bc_lengths_no_N[i], trim_side, need_traceback)
-        end
+            if isnothing(nindel)
+                alignment_result = semiglobal_alignment(ws, bc, seq, max_error_rate, match, mismatch, indel, ref_search_range, max_start_pos, min_end_pos, trim_side, need_traceback)
+            else
+                alignment_result = semiglobal_alignment_N(ws, bc, seq, max_error_rate, match, mismatch, indel, nindel, ref_search_range, max_start_pos, min_end_pos, bc_lengths_no_N[i], trim_side, need_traceback)
+            end
 
-        if isnothing(trim_side) && !need_traceback
-            score = alignment_result
-            s, e = -1, -1
-        else
-            (score, s, e) = alignment_result
+            if isnothing(trim_side) && !need_traceback
+                score = alignment_result
+                s, e = -1, -1
+            else
+                (score, s, e) = alignment_result
+            end
         end
 
         if score <= max_error_rate
@@ -552,9 +641,9 @@ A tuple `(min_score_bc, min_score, delta, best_start, best_end)`.
 
 function find_best_matching_bc(seq::String, bc_seqs::Vector{String}, bc_lengths_no_N::Vector{Int}, config::DemuxConfig, ws::SemiGlobalWorkspace, ref_search_range::UnitRange{Int}, max_start_pos::Int, min_end_pos::Int, trim_side::Union{Int,Nothing}, need_traceback::Bool=false)
     if config.min_delta == 0.0
-        return find_best_matching_bc_no_delta(seq, bc_seqs, bc_lengths_no_N, ws, config.max_error_rate, config.match, config.mismatch, config.indel, config.nindel, ref_search_range, max_start_pos, min_end_pos, trim_side, need_traceback)
+        return find_best_matching_bc_no_delta(seq, bc_seqs, bc_lengths_no_N, ws, config.matching_algorithm, config.max_error_rate, config.match, config.mismatch, config.indel, config.nindel, ref_search_range, max_start_pos, min_end_pos, trim_side, need_traceback)
     else
-        return find_best_matching_bc_with_delta(seq, bc_seqs, bc_lengths_no_N, ws, config.max_error_rate, config.match, config.mismatch, config.indel, config.nindel, ref_search_range, max_start_pos, min_end_pos, trim_side, need_traceback)
+        return find_best_matching_bc_with_delta(seq, bc_seqs, bc_lengths_no_N, ws, config.matching_algorithm, config.max_error_rate, config.match, config.mismatch, config.indel, config.nindel, ref_search_range, max_start_pos, min_end_pos, trim_side, need_traceback)
     end
 end
 

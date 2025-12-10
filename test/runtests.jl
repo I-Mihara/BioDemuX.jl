@@ -7,6 +7,7 @@ include("common.jl")
 @testset "Unit Tests" begin
     include("unit/alignment.jl")
     include("unit/trimming.jl")
+    include("unit/hamming.jl")
 end
 
 println("Running tests with $(Threads.nthreads()) threads")
@@ -15,7 +16,9 @@ println("Running tests with $(Threads.nthreads()) threads")
     include("integration/single_barcode.jl")
     include("integration/dual_barcode.jl")
     include("integration/summary_mode.jl")
+
     include("integration/summary_distributions.jl")
+    include("integration/hamming_demux.jl")
 end
 
 if Threads.nthreads() == 1
