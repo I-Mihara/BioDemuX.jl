@@ -127,7 +127,8 @@ execute_demultiplexing(FASTQ_file, barcode_file, output_directory; barcode_file2
 - **`matching_algorithm::Symbol`** (default: `:semiglobal`):
   - Specifies the algorithm used for barcode matching.
     - `:semiglobal`: Uses semi-global alignment allowing for mismatches, insertions, and deletions. This is the default and most robust mode.
-    - `:hamming`: Uses Hamming distance, allowing only for mismatches (no insertions or deletions). This mode is significantly faster but less robust to indel errors. Use this if your data quality is high or if speed is critical.
+    - `:hamming`: Uses Hamming distance, allowing only for mismatches (no insertions or deletions). Faster than semiglobal.
+    - `:exact`: Uses exact string matching, allowing no mismatches or indels. Fastest mode. Use only when data quality is perfect or strict filtering is desired.
 
 - **`min_delta::Float64`** (default: `0.0`): 
   - This defines the minimum difference in penalty scores needed to confidently assign a sequence to a barcode. It is multiplied by the barcode's length to determine the score difference required to avoid ambiguity. If the difference between the best match's penalty score and the second-best match's score is less than this threshold, the sequence is considered ambiguous and saved in `ambiguous_classification.fastq`.
