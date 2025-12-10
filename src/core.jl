@@ -302,7 +302,8 @@ function execute_demultiplexing(
     trim_side::Union{Int,Nothing}=nothing,
     trim_side2::Union{Int,Nothing}=nothing,
     summary::Bool=false,
-    summary_format::Symbol=:html
+    summary_format::Symbol=:html,
+    matching_algorithm::Symbol=:semiglobal
 )
 
     # Validate trim_side
@@ -362,7 +363,8 @@ function execute_demultiplexing(
         trim_side=trim_side,
         trim_side2=trim_side2,
         summary=summary,
-        summary_format=summary_format
+        summary_format=summary_format,
+        matching_algorithm=matching_algorithm
     )
 
     # Channels
@@ -451,7 +453,8 @@ function execute_demultiplexing(
     trim_side::Union{Int,Nothing}=nothing,
     trim_side2::Union{Int,Nothing}=nothing,
     summary::Bool=false,
-    summary_format::Symbol=:html
+    summary_format::Symbol=:html,
+    matching_algorithm::Symbol=:semiglobal
 )
 
     # Validate trim_side
@@ -511,7 +514,8 @@ function execute_demultiplexing(
         trim_side=trim_side,
         trim_side2=trim_side2,
         summary=summary,
-        summary_format=summary_format
+        summary_format=summary_format,
+        matching_algorithm=matching_algorithm
     )
 
     # Channels
