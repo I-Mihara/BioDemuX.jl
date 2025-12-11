@@ -38,6 +38,8 @@ struct Chunk
     data2::Union{FastqChunk,Nothing} # For paired-end
 end
 
+using Dates
+
 function reader_task(input_channel::Channel{Chunk}, recycle_channel::Channel{Chunk}, file1::String, file2::Union{String,Nothing}, chunk_size::Int)
     read_fastq(file1) do io1
         if !isnothing(file2)
@@ -300,11 +302,26 @@ function execute_demultiplexing(
     chunk_size::Int=4000,
     channel_capacity::Int=64,
     trim_side::Union{Int,Nothing}=nothing,
-    trim_side2::Union{Int,Nothing}=nothing,
     summary::Bool=false,
     summary_format::Symbol=:html,
-    matching_algorithm::Symbol=:semiglobal
+    matching_algorithm::Symbol=:semiglobal,
+    log::Bool=false
 )
+    start_time = now()
+    if log
+        time_str = Dates.format(start_time, "HH:MM:SS")
+        println(stderr, "[$time_str] Info: BioDemuX demultiplexing started.")
+        println(stderr, "[$time_str] Info: Configuration:")
+        println(stderr, "  - Input 1: ", basename(FASTQ_file1))
+        println(stderr, "  - Input 2: ", basename(FASTQ_file2))
+        println(stderr, "  - Barcode File: ", basename(barcode_file))
+        if !isnothing(barcode_file2)
+            println(stderr, "  - Barcode File 2: ", basename(barcode_file2))
+        end
+        println(stderr, "  - Output Directory: ", output_directory)
+        println(stderr, "  - Threads: ", Threads.nthreads())
+        println(stderr, "  - Max Error Rate: ", max_error_rate)
+    end
 
     # Validate trim_side
     if !isnothing(trim_side) && trim_side != 3 && trim_side != 5
@@ -420,10 +437,19 @@ function execute_demultiplexing(
 
     wait(writer)
 
+    end_time = now()
+    duration = end_time - start_time
+
+    duration_str = string(Dates.canonicalize(duration))
+    if log
+        end_time_str = Dates.format(end_time, "HH:MM:SS")
+        println(stderr, "[$end_time_str] Done: Finished in $duration_str.")
+    end
+
     if config.summary
         stats_list = fetch(monitor)
         merged_stats = merge_stats(stats_list)
-        generate_summary_report(merged_stats, config, output_directory, FASTQ_file1, barcode_file, FASTQ_file2, barcode_file2; bc_complement=bc_complement, bc_rev=bc_rev, trim_side=trim_side, trim_side2=trim_side2)
+        generate_summary_report(merged_stats, config, output_directory, FASTQ_file1, barcode_file, FASTQ_file2, barcode_file2; bc_complement=bc_complement, bc_rev=bc_rev, trim_side=trim_side, trim_side2=trim_side2, n_threads=Threads.nthreads(), duration=duration)
     end
 end
 
@@ -454,8 +480,23 @@ function execute_demultiplexing(
     trim_side2::Union{Int,Nothing}=nothing,
     summary::Bool=false,
     summary_format::Symbol=:html,
-    matching_algorithm::Symbol=:semiglobal
+    matching_algorithm::Symbol=:semiglobal,
+    log::Bool=false
 )
+    start_time = now()
+    if log
+        time_str = Dates.format(start_time, "HH:MM:SS")
+        println(stderr, "[$time_str] Info: BioDemuX demultiplexing started.")
+        println(stderr, "[$time_str] Info: Configuration:")
+        println(stderr, "  - Input: ", basename(FASTQ_file))
+        println(stderr, "  - Barcode File: ", basename(barcode_file))
+        if !isnothing(barcode_file2)
+            println(stderr, "  - Barcode File 2: ", basename(barcode_file2))
+        end
+        println(stderr, "  - Output Directory: ", output_directory)
+        println(stderr, "  - Threads: ", Threads.nthreads())
+        println(stderr, "  - Max Error Rate: ", max_error_rate)
+    end
 
     # Validate trim_side
     if !isnothing(trim_side) && trim_side != 3 && trim_side != 5
@@ -572,9 +613,18 @@ function execute_demultiplexing(
 
     wait(writer)
 
+    end_time = now()
+    duration = end_time - start_time
+
+    duration_str = string(Dates.canonicalize(duration))
+    if log
+        end_time_str = Dates.format(end_time, "HH:MM:SS")
+        println(stderr, "[$end_time_str] Done: Finished in $duration_str.")
+    end
+
     if config.summary
         stats_list = fetch(monitor)
         merged_stats = merge_stats(stats_list)
-        generate_summary_report(merged_stats, config, output_directory, FASTQ_file, barcode_file, nothing, barcode_file2; bc_complement=bc_complement, bc_rev=bc_rev, trim_side=trim_side, trim_side2=trim_side2)
+        generate_summary_report(merged_stats, config, output_directory, FASTQ_file, barcode_file, nothing, barcode_file2; bc_complement=bc_complement, bc_rev=bc_rev, trim_side=trim_side, trim_side2=trim_side2, n_threads=Threads.nthreads(), duration=duration)
     end
 end
