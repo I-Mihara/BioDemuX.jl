@@ -302,6 +302,7 @@ function execute_demultiplexing(
     chunk_size::Int=4000,
     channel_capacity::Int=64,
     trim_side::Union{Int,Nothing}=nothing,
+    trim_side2::Union{Int,Nothing}=nothing,
     summary::Bool=false,
     summary_format::Symbol=:html,
     matching_algorithm::Symbol=:semiglobal,
