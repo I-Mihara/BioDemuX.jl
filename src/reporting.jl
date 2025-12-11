@@ -57,7 +57,7 @@ function merge_stats(stats_list::Vector{DemuxStats})
     return merged
 end
 
-function write_text_report(stats::DemuxStats, config::DemuxConfig, output_dir::String, fastq_path::String, bc_path::String, fastq_path2::Union{String,Nothing}=nothing, bc_path2::Union{String,Nothing}=nothing; bc_complement::Bool=false, bc_rev::Bool=false, trim_side::Union{Int,Nothing}=nothing, trim_side2::Union{Int,Nothing}=nothing)
+function write_text_report(stats::DemuxStats, config::DemuxConfig, output_dir::String, fastq_path::String, bc_path::String, fastq_path2::Union{String,Nothing}=nothing, bc_path2::Union{String,Nothing}=nothing; bc_complement::Bool=false, bc_rev::Bool=false, trim_side::Union{Int,Nothing}=nothing, trim_side2::Union{Int,Nothing}=nothing, n_threads::Union{Int,Nothing}=nothing, duration::Union{Dates.Period,Nothing}=nothing)
     output_file = joinpath(output_dir, "summary.txt")
     mode = isfile(output_file) ? "a" : "w"
 
@@ -74,6 +74,12 @@ function write_text_report(stats::DemuxStats, config::DemuxConfig, output_dir::S
         println(io, "  Barcode File: ", bc_path)
         if !isnothing(bc_path2)
             println(io, "  Barcode File 2: ", bc_path2)
+        end
+        if !isnothing(n_threads)
+            println(io, "  Threads: ", n_threads)
+        end
+        if !isnothing(duration)
+            println(io, "  Duration: ", string(Dates.canonicalize(duration)))
         end
         println(io, "  Parameters:")
         println(io, "    Max Error Rate: ", config.max_error_rate)
@@ -124,7 +130,7 @@ function write_text_report(stats::DemuxStats, config::DemuxConfig, output_dir::S
     end
 end
 
-function write_json_report(stats::DemuxStats, config::DemuxConfig, output_dir::String, fastq_path::String, bc_path::String, fastq_path2::Union{String,Nothing}=nothing, bc_path2::Union{String,Nothing}=nothing; bc_complement::Bool=false, bc_rev::Bool=false, trim_side::Union{Int,Nothing}=nothing, trim_side2::Union{Int,Nothing}=nothing)
+function write_json_report(stats::DemuxStats, config::DemuxConfig, output_dir::String, fastq_path::String, bc_path::String, fastq_path2::Union{String,Nothing}=nothing, bc_path2::Union{String,Nothing}=nothing; bc_complement::Bool=false, bc_rev::Bool=false, trim_side::Union{Int,Nothing}=nothing, trim_side2::Union{Int,Nothing}=nothing, n_threads::Union{Int,Nothing}=nothing, duration::Union{Dates.Period,Nothing}=nothing)
     # Simple JSON construction
     function dict_to_json(d)
         items = String[]
@@ -144,6 +150,8 @@ function write_json_report(stats::DemuxStats, config::DemuxConfig, output_dir::S
         "input_fastq2": $(isnothing(fastq_path2) ? "null" : "\"$fastq_path2\""),
         "barcode_file": "$bc_path",
         "barcode_file2": $(isnothing(bc_path2) ? "null" : "\"$bc_path2\""),
+        "threads": $(isnothing(n_threads) ? "null" : n_threads),
+        "duration": $(isnothing(duration) ? "null" : "\"$(string(Dates.canonicalize(duration)))\""),
         "parameters": {
             "max_error_rate": $(config.max_error_rate),
             "min_delta": $(config.min_delta),
@@ -217,7 +225,7 @@ function write_json_report(stats::DemuxStats, config::DemuxConfig, output_dir::S
     end
 end
 
-function write_stdout_report(stats::DemuxStats, config::DemuxConfig, fastq_path::String, bc_path::String, fastq_path2::Union{String,Nothing}=nothing, bc_path2::Union{String,Nothing}=nothing; bc_complement::Bool=false, bc_rev::Bool=false, trim_side::Union{Int,Nothing}=nothing, trim_side2::Union{Int,Nothing}=nothing)
+function write_stdout_report(stats::DemuxStats, config::DemuxConfig, fastq_path::String, bc_path::String, fastq_path2::Union{String,Nothing}=nothing, bc_path2::Union{String,Nothing}=nothing; bc_complement::Bool=false, bc_rev::Bool=false, trim_side::Union{Int,Nothing}=nothing, trim_side2::Union{Int,Nothing}=nothing, n_threads::Union{Int,Nothing}=nothing, duration::Union{Dates.Period,Nothing}=nothing)
     println(stdout, "BioDemuX Summary Report")
     println(stdout, "=======================")
     println(stdout, "Run Information:")
@@ -226,6 +234,12 @@ function write_stdout_report(stats::DemuxStats, config::DemuxConfig, fastq_path:
     println(stdout, "  Barcode File: ", bc_path)
     if !isnothing(bc_path2)
         println(stdout, "  Barcode File 2: ", bc_path2)
+    end
+    if !isnothing(n_threads)
+        println(stdout, "  Threads: ", n_threads)
+    end
+    if !isnothing(duration)
+        println(stdout, "  Duration: ", string(Dates.canonicalize(duration)))
     end
     println(stdout, "  Parameters:")
     println(stdout, "    Max Error Rate: ", config.max_error_rate)
@@ -275,7 +289,7 @@ function write_stdout_report(stats::DemuxStats, config::DemuxConfig, fastq_path:
     end
 end
 
-function write_html_report(stats::DemuxStats, config::DemuxConfig, output_dir::String, fastq_path::String, bc_path::String, fastq_path2::Union{String,Nothing}=nothing, bc_path2::Union{String,Nothing}=nothing; bc_complement::Bool=false, bc_rev::Bool=false, trim_side::Union{Int,Nothing}=nothing, trim_side2::Union{Int,Nothing}=nothing)
+function write_html_report(stats::DemuxStats, config::DemuxConfig, output_dir::String, fastq_path::String, bc_path::String, fastq_path2::Union{String,Nothing}=nothing, bc_path2::Union{String,Nothing}=nothing; bc_complement::Bool=false, bc_rev::Bool=false, trim_side::Union{Int,Nothing}=nothing, trim_side2::Union{Int,Nothing}=nothing, n_threads::Union{Int,Nothing}=nothing, duration::Union{Dates.Period,Nothing}=nothing)
     # Rich HTML report with CSS/SVG
 
     # Helper to generate SVG bar chart
@@ -383,6 +397,8 @@ function write_html_report(stats::DemuxStats, config::DemuxConfig, output_dir::S
                     <li><strong>Input FASTQ(s):</strong> $fastq_path $(!isnothing(fastq_path2) ? ", " * fastq_path2 : "")</li>
                     <li><strong>Barcode File:</strong> $bc_path</li>
                     $(!isnothing(bc_path2) ? "<li><strong>Barcode File 2:</strong> $bc_path2</li>" : "")
+                    $(!isnothing(n_threads) ? "<li><strong>Threads:</strong> $n_threads</li>" : "")
+                    $(!isnothing(duration) ? "<li><strong>Duration:</strong> $(string(Dates.canonicalize(duration)))</li>" : "")
                     <li><strong>Parameters:</strong>
                         $param_list_html
                     </li>
@@ -725,15 +741,15 @@ function write_html_report(stats::DemuxStats, config::DemuxConfig, output_dir::S
     end
 end
 
-function generate_summary_report(stats::DemuxStats, config::DemuxConfig, output_dir::String, fastq_path::String, bc_path::String, fastq_path2::Union{String,Nothing}=nothing, bc_path2::Union{String,Nothing}=nothing; bc_complement::Bool=false, bc_rev::Bool=false, trim_side::Union{Int,Nothing}=nothing, trim_side2::Union{Int,Nothing}=nothing)
+function generate_summary_report(stats::DemuxStats, config::DemuxConfig, output_dir::String, fastq_path::String, bc_path::String, fastq_path2::Union{String,Nothing}=nothing, bc_path2::Union{String,Nothing}=nothing; bc_complement::Bool=false, bc_rev::Bool=false, trim_side::Union{Int,Nothing}=nothing, trim_side2::Union{Int,Nothing}=nothing, n_threads::Union{Int,Nothing}=nothing, duration::Union{Dates.Period,Nothing}=nothing)
     if config.summary_format == :json
-        write_json_report(stats, config, output_dir, fastq_path, bc_path, fastq_path2, bc_path2; bc_complement=bc_complement, bc_rev=bc_rev, trim_side=trim_side, trim_side2=trim_side2)
+        write_json_report(stats, config, output_dir, fastq_path, bc_path, fastq_path2, bc_path2; bc_complement=bc_complement, bc_rev=bc_rev, trim_side=trim_side, trim_side2=trim_side2, n_threads=n_threads, duration=duration)
     elseif config.summary_format == :html
-        write_html_report(stats, config, output_dir, fastq_path, bc_path, fastq_path2, bc_path2; bc_complement=bc_complement, bc_rev=bc_rev, trim_side=trim_side, trim_side2=trim_side2)
+        write_html_report(stats, config, output_dir, fastq_path, bc_path, fastq_path2, bc_path2; bc_complement=bc_complement, bc_rev=bc_rev, trim_side=trim_side, trim_side2=trim_side2, n_threads=n_threads, duration=duration)
     elseif config.summary_format == :stdout
-        write_stdout_report(stats, config, fastq_path, bc_path, fastq_path2, bc_path2; bc_complement=bc_complement, bc_rev=bc_rev, trim_side=trim_side, trim_side2=trim_side2)
+        write_stdout_report(stats, config, fastq_path, bc_path, fastq_path2, bc_path2; bc_complement=bc_complement, bc_rev=bc_rev, trim_side=trim_side, trim_side2=trim_side2, n_threads=n_threads, duration=duration)
     else
-        write_text_report(stats, config, output_dir, fastq_path, bc_path, fastq_path2, bc_path2; bc_complement=bc_complement, bc_rev=bc_rev, trim_side=trim_side, trim_side2=trim_side2)
+        write_text_report(stats, config, output_dir, fastq_path, bc_path, fastq_path2, bc_path2; bc_complement=bc_complement, bc_rev=bc_rev, trim_side=trim_side, trim_side2=trim_side2, n_threads=n_threads, duration=duration)
     end
 end
 
