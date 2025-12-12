@@ -40,7 +40,7 @@ end
 
 using Dates
 
-function reader_task(input_channel::Channel{Chunk}, recycle_channel::Channel{Chunk}, file1::String, file2::Union{String,Nothing}, chunk_size::Int)
+function reader_task(input_channel::Channel{Chunk}, recycle_channel::Channel{Chunk}, file1::String, file2::Union{String,Nothing}, chunk_size::Int, recycle_count::Threads.Atomic{Int})
     read_fastq(file1) do io1
         if !isnothing(file2)
             read_fastq(file2) do io2
@@ -51,6 +51,7 @@ function reader_task(input_channel::Channel{Chunk}, recycle_channel::Channel{Chu
                     local c2::FastqChunk
                     if isready(recycle_channel)
                         chunk = take!(recycle_channel)
+                        Threads.atomic_sub!(recycle_count, 1)
                         # We reuse the FastqChunk objects but create a new Chunk wrapper with updated ID
                         c1 = chunk.data
                         c2 = chunk.data2
@@ -85,6 +86,7 @@ function reader_task(input_channel::Channel{Chunk}, recycle_channel::Channel{Chu
                 local c1::FastqChunk
                 if isready(recycle_channel)
                     chunk = take!(recycle_channel)
+                    Threads.atomic_sub!(recycle_count, 1)
                     c1 = chunk.data
                     empty!(c1)
                 else
@@ -113,7 +115,7 @@ struct ResultChunk
     trim_ranges::Union{Vector{Union{UnitRange{Int},Nothing}},Nothing}
 end
 
-function writer_task(output_channel::Channel{ResultChunk}, recycle_channel::Channel{Chunk}, output_dir::String, output_prefix1::String, output_prefix2::String, config::DemuxConfig)
+function writer_task(output_channel::Channel{ResultChunk}, recycle_channel::Channel{Chunk}, output_dir::String, output_prefix1::String, output_prefix2::String, config::DemuxConfig, recycle_capacity::Int, recycle_count::Threads.Atomic{Int})
     # Dictionary to keep track of open file handles
     file_handles = Dict{String,BufferedOutputStream}()
 
@@ -121,7 +123,9 @@ function writer_task(output_channel::Channel{ResultChunk}, recycle_channel::Chan
         if !haskey(file_handles, filename)
             path = joinpath(output_dir, filename)
             raw = open(path, "a")
-            io = endswith(lowercase(path), ".gz") ? GzipCompressorStream(raw) : raw
+            # Enforce gzip if config says so, OR if filename implies it (fallback)
+            should_gzip = config.gzip_output || endswith(lowercase(path), ".gz")
+            io = should_gzip ? GzipCompressorStream(raw) : raw
             file_handles[filename] = BufferedOutputStream(io)
         end
         return file_handles[filename]
@@ -138,6 +142,7 @@ function writer_task(output_channel::Channel{ResultChunk}, recycle_channel::Chan
     for result_chunk in output_channel
         pending_chunks[result_chunk.chunk.id] = result_chunk
 
+        # Process sequential chunks
         while haskey(pending_chunks, next_chunk_id)
             rc = pending_chunks[next_chunk_id]
             delete!(pending_chunks, next_chunk_id)
@@ -153,10 +158,10 @@ function writer_task(output_channel::Channel{ResultChunk}, recycle_channel::Chan
                 # Prepare data to write
                 h1, s1, p1, q1 = chunk.data.headers[i], chunk.data.seqs[i], chunk.data.pluses[i], chunk.data.quals[i]
 
-                # Apply trimming if needed (only to Read 1)
+                # Apply trimming if needed (only to Read 1 in single-end or relevant read logic)
                 if !isnothing(trim_ranges) && !isnothing(trim_ranges[i])
                     r = trim_ranges[i]
-                    # Ensure range is within bounds (it should be, but safety check)
+                    # Ensure range is within bounds
                     r = intersect(r, 1:ncodeunits(s1))
                     if !isempty(r)
                         s1 = s1[r]
@@ -192,21 +197,19 @@ function writer_task(output_channel::Channel{ResultChunk}, recycle_channel::Chan
             end
 
             # Recycle the chunk
-            # Empty the FastqChunk objects within the Chunk before recycling
             empty!(chunk.data)
             if !isnothing(chunk.data2)
                 empty!(chunk.data2)
             end
 
-            # Only put back if there is space, otherwise let GC handle it
-            # This prevents deadlock if the system created more chunks than recycle capacity
-            lock(recycle_channel)
-            try
-                if Base.n_avail(recycle_channel) < recycle_channel.sz_max
-                    put!(recycle_channel, chunk)
-                end
-            finally
-                unlock(recycle_channel)
+            # Safe recycling using atomic counter
+            old_count = Threads.atomic_add!(recycle_count, 1)
+            if old_count < recycle_capacity
+                put!(recycle_channel, chunk)
+            else
+                # We exceeded capacity, rollback and drop
+                Threads.atomic_sub!(recycle_count, 1)
+                # Drop chunk (let GC handle it)
             end
 
             next_chunk_id += 1
@@ -275,6 +278,85 @@ function worker_task(input_channel::Channel{Chunk}, output_channel::Channel{Resu
     return stats
 end
 
+function build_config(
+    barcode_file::String,
+    barcode_file2::Union{String,Nothing},
+    fastqs::Vector{String},
+    gzip_output::Union{Bool,Nothing},
+    bc_complement::Bool,
+    bc_rev::Bool,
+    classify_both::Bool,
+    max_error_rate::Float64,
+    min_delta::Float64,
+    match::Int,
+    mismatch::Int,
+    indel::Int,
+    nindel::Union{Int,Nothing},
+    ref_search_range::String,
+    barcode_start_range::String,
+    barcode_end_range::String,
+    ref_search_range2::String,
+    barcode_start_range2::String,
+    barcode_end_range2::String,
+    trim_side::Union{Int,Nothing},
+    trim_side2::Union{Int,Nothing},
+    summary::Bool,
+    summary_format::Symbol,
+    matching_algorithm::Symbol
+)
+    # Validate trim_side
+    if !isnothing(trim_side) && trim_side != 3 && trim_side != 5
+        error("trim_side must be 3 or 5, got $trim_side")
+    end
+    if !isnothing(trim_side2) && trim_side2 != 3 && trim_side2 != 5
+        error("trim_side2 must be 3 or 5, got $trim_side2")
+    end
+
+    # Gzip output default
+    final_gzip_output = isnothing(gzip_output) ? any(endswith(f, ".gz") for f in fastqs) : gzip_output
+
+    # Preprocess barcodes
+    bc_seqs, bc_lengths_no_N, ids = preprocess_bc_file(barcode_file, bc_complement, bc_rev)
+
+    is_dual = !isnothing(barcode_file2)
+    bc_seqs2 = String[]
+    bc_lengths_no_N2 = Int[]
+    ids2 = String[]
+
+    if is_dual
+        bc_seqs2, bc_lengths_no_N2, ids2 = preprocess_bc_file(barcode_file2, bc_complement, bc_rev)
+    end
+
+    return DemuxConfig(
+        max_error_rate=max_error_rate,
+        min_delta=min_delta,
+        match=match,
+        mismatch=mismatch,
+        indel=indel,
+        nindel=nindel,
+        classify_both=classify_both,
+        gzip_output=final_gzip_output,
+        ref_search_range=parse_dynamic_range(ref_search_range),
+        barcode_start_range=parse_dynamic_range(barcode_start_range),
+        barcode_end_range=parse_dynamic_range(barcode_end_range),
+        bc_seqs=bc_seqs,
+        bc_lengths_no_N=bc_lengths_no_N,
+        ids=ids,
+        is_dual=is_dual,
+        ref_search_range2=parse_dynamic_range(ref_search_range2),
+        barcode_start_range2=parse_dynamic_range(barcode_start_range2),
+        barcode_end_range2=parse_dynamic_range(barcode_end_range2),
+        bc_seqs2=bc_seqs2,
+        bc_lengths_no_N2=bc_lengths_no_N2,
+        ids2=ids2,
+        trim_side=trim_side,
+        trim_side2=trim_side2,
+        summary=summary,
+        summary_format=summary_format,
+        matching_algorithm=matching_algorithm
+    )
+end
+
 function execute_demultiplexing(
     FASTQ_file1::String,
     FASTQ_file2::String,
@@ -324,29 +406,9 @@ function execute_demultiplexing(
         println(stderr, "  - Max Error Rate: ", max_error_rate)
     end
 
-    # Validate trim_side
-    if !isnothing(trim_side) && trim_side != 3 && trim_side != 5
-        error("trim_side must be 3 or 5, got $trim_side")
-    end
-
     # Handle backward compatibility for range arguments
     if !isdir(output_directory)
         mkdir(output_directory)
-    end
-
-    bc_seqs, bc_lengths_no_N, ids = preprocess_bc_file(barcode_file, bc_complement, bc_rev)
-
-    is_dual = !isnothing(barcode_file2)
-    bc_seqs2 = String[]
-    bc_lengths_no_N2 = Int[]
-    ids2 = String[]
-
-    if is_dual
-        bc_seqs2, bc_lengths_no_N2, ids2 = preprocess_bc_file(barcode_file2, bc_complement, bc_rev)
-    end
-
-    if isnothing(gzip_output)
-        gzip_output = endswith(FASTQ_file1, ".gz") || endswith(FASTQ_file2, ".gz")
     end
 
     if output_prefix1 == ""
@@ -356,46 +418,30 @@ function execute_demultiplexing(
         output_prefix2 = replace(basename(FASTQ_file2), r"\.fastq(\.gz)?$" => "")
     end
 
-    config = DemuxConfig(
-        max_error_rate=max_error_rate,
-        min_delta=min_delta,
-        match=match,
-        mismatch=mismatch,
-        indel=indel,
-        nindel=nindel,
-        classify_both=classify_both,
-        gzip_output=gzip_output,
-        ref_search_range=parse_dynamic_range(ref_search_range),
-        barcode_start_range=parse_dynamic_range(barcode_start_range),
-        barcode_end_range=parse_dynamic_range(barcode_end_range),
-        bc_seqs=bc_seqs,
-        bc_lengths_no_N=bc_lengths_no_N,
-        ids=ids,
-        is_dual=is_dual,
-        ref_search_range2=parse_dynamic_range(ref_search_range2),
-        barcode_start_range2=parse_dynamic_range(barcode_start_range2),
-        barcode_end_range2=parse_dynamic_range(barcode_end_range2),
-        bc_seqs2=bc_seqs2,
-        bc_lengths_no_N2=bc_lengths_no_N2,
-        ids2=ids2,
-        trim_side=trim_side,
-        trim_side2=trim_side2,
-        summary=summary,
-        summary_format=summary_format,
-        matching_algorithm=matching_algorithm
+    config = build_config(
+        barcode_file, barcode_file2,
+        [FASTQ_file1, FASTQ_file2],
+        gzip_output,
+        bc_complement, bc_rev,
+        classify_both,
+        max_error_rate, min_delta, match, mismatch, indel, nindel,
+        ref_search_range, barcode_start_range, barcode_end_range,
+        ref_search_range2, barcode_start_range2, barcode_end_range2,
+        trim_side, trim_side2,
+        summary, summary_format, matching_algorithm
     )
 
     # Channels
     input_channel = Channel{Chunk}(channel_capacity)
     output_channel = Channel{ResultChunk}(channel_capacity)
-    recycle_channel = Channel{Chunk}(2 * channel_capacity)
+    recycle_capacity = 2 * channel_capacity
+    recycle_channel = Channel{Chunk}(recycle_capacity)
+    recycle_count = Threads.Atomic{Int}(0)
 
     # Start tasks
-
-    # Reader
     reader = Threads.@spawn begin
         try
-            reader_task(input_channel, recycle_channel, FASTQ_file1, FASTQ_file2, chunk_size)
+            reader_task(input_channel, recycle_channel, FASTQ_file1, FASTQ_file2, chunk_size, recycle_count)
         catch e
             println(stderr, "Reader task failed: ", e)
             showerror(stderr, e, catch_backtrace())
@@ -405,7 +451,6 @@ function execute_demultiplexing(
         end
     end
 
-    # Workers
     workers = Vector{Task}(undef, Threads.nthreads())
     for i in 1:Threads.nthreads()
         workers[i] = Threads.@spawn begin
@@ -420,7 +465,6 @@ function execute_demultiplexing(
         end
     end
 
-    # Monitor workers
     monitor = Threads.@spawn begin
         stats_list = DemuxStats[]
         for w in workers
@@ -433,8 +477,7 @@ function execute_demultiplexing(
         return stats_list
     end
 
-    # Writer
-    writer = Threads.@spawn writer_task(output_channel, recycle_channel, output_directory, output_prefix1, output_prefix2, config)
+    writer = Threads.@spawn writer_task(output_channel, recycle_channel, output_directory, output_prefix1, output_prefix2, config, recycle_capacity, recycle_count)
 
     wait(writer)
 
@@ -499,78 +542,39 @@ function execute_demultiplexing(
         println(stderr, "  - Max Error Rate: ", max_error_rate)
     end
 
-    # Validate trim_side
-    if !isnothing(trim_side) && trim_side != 3 && trim_side != 5
-        error("trim_side must be 3 or 5, got $trim_side")
-    end
-    if !isnothing(trim_side2) && trim_side2 != 3 && trim_side2 != 5
-        error("trim_side2 must be 3 or 5, got $trim_side2")
-    end
-
     # Handle backward compatibility for range arguments
     if !isdir(output_directory)
         mkdir(output_directory)
-    end
-
-    bc_seqs, bc_lengths_no_N, ids = preprocess_bc_file(barcode_file, bc_complement, bc_rev)
-
-    is_dual = !isnothing(barcode_file2)
-    bc_seqs2 = String[]
-    bc_lengths_no_N2 = Int[]
-    ids2 = String[]
-
-    if is_dual
-        bc_seqs2, bc_lengths_no_N2, ids2 = preprocess_bc_file(barcode_file2, bc_complement, bc_rev)
-    end
-
-    if isnothing(gzip_output)
-        gzip_output = endswith(FASTQ_file, ".gz")
     end
 
     if output_prefix == ""
         output_prefix = replace(basename(FASTQ_file), r"\.fastq(\.gz)?$" => "")
     end
 
-    config = DemuxConfig(
-        max_error_rate=max_error_rate,
-        min_delta=min_delta,
-        match=match,
-        mismatch=mismatch,
-        indel=indel,
-        nindel=nindel,
-        classify_both=false,
-        gzip_output=gzip_output,
-        ref_search_range=parse_dynamic_range(ref_search_range),
-        barcode_start_range=parse_dynamic_range(barcode_start_range),
-        barcode_end_range=parse_dynamic_range(barcode_end_range),
-        bc_seqs=bc_seqs,
-        bc_lengths_no_N=bc_lengths_no_N,
-        ids=ids,
-        is_dual=is_dual,
-        ref_search_range2=parse_dynamic_range(ref_search_range2),
-        barcode_start_range2=parse_dynamic_range(barcode_start_range2),
-        barcode_end_range2=parse_dynamic_range(barcode_end_range2),
-        bc_seqs2=bc_seqs2,
-        bc_lengths_no_N2=bc_lengths_no_N2,
-        ids2=ids2,
-        trim_side=trim_side,
-        trim_side2=trim_side2,
-        summary=summary,
-        summary_format=summary_format,
-        matching_algorithm=matching_algorithm
+    config = build_config(
+        barcode_file, barcode_file2,
+        [FASTQ_file],
+        gzip_output,
+        bc_complement, bc_rev,
+        false, # classify_both
+        max_error_rate, min_delta, match, mismatch, indel, nindel,
+        ref_search_range, barcode_start_range, barcode_end_range,
+        ref_search_range2, barcode_start_range2, barcode_end_range2,
+        trim_side, trim_side2,
+        summary, summary_format, matching_algorithm
     )
 
     # Channels
     input_channel = Channel{Chunk}(channel_capacity)
     output_channel = Channel{ResultChunk}(channel_capacity)
-    recycle_channel = Channel{Chunk}(2 * channel_capacity)
+    recycle_capacity = 2 * channel_capacity
+    recycle_channel = Channel{Chunk}(recycle_capacity)
+    recycle_count = Threads.Atomic{Int}(0)
 
     # Start tasks
-
-    # Reader
     reader = Threads.@spawn begin
         try
-            reader_task(input_channel, recycle_channel, FASTQ_file, nothing, chunk_size)
+            reader_task(input_channel, recycle_channel, FASTQ_file, nothing, chunk_size, recycle_count)
         catch e
             println(stderr, "Reader task failed: ", e)
             showerror(stderr, e, catch_backtrace())
@@ -580,8 +584,6 @@ function execute_demultiplexing(
         end
     end
 
-    # Workers
-    # Workers
     workers = Vector{Task}(undef, Threads.nthreads())
     for i in 1:Threads.nthreads()
         workers[i] = Threads.@spawn begin
@@ -596,7 +598,6 @@ function execute_demultiplexing(
         end
     end
 
-    # Monitor workers
     monitor = Threads.@spawn begin
         stats_list = DemuxStats[]
         for w in workers
@@ -609,8 +610,7 @@ function execute_demultiplexing(
         return stats_list
     end
 
-    # Writer
-    writer = Threads.@spawn writer_task(output_channel, recycle_channel, output_directory, output_prefix, "", config)
+    writer = Threads.@spawn writer_task(output_channel, recycle_channel, output_directory, output_prefix, "", config, recycle_capacity, recycle_count)
 
     wait(writer)
 
