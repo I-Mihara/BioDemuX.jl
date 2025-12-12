@@ -23,7 +23,8 @@ Base.@kwdef struct DemuxConfig
     classify_both::Bool = false
     gzip_output::Bool = false
 
-    # Range 1
+
+
     ref_search_range::DynamicRange = parse_dynamic_range("1:end")
     barcode_start_range::DynamicRange = parse_dynamic_range("1:end")
     barcode_end_range::DynamicRange = parse_dynamic_range("1:end")
@@ -31,7 +32,8 @@ Base.@kwdef struct DemuxConfig
     bc_lengths_no_N::Vector{Int}
     ids::Vector{String}
 
-    # Dual Index Support
+
+
     is_dual::Bool = false
     ref_search_range2::DynamicRange = parse_dynamic_range("1:end")
     barcode_start_range2::DynamicRange = parse_dynamic_range("1:end")
@@ -40,15 +42,18 @@ Base.@kwdef struct DemuxConfig
     bc_lengths_no_N2::Vector{Int} = Int[]
     ids2::Vector{String} = String[]
 
-    # Trimming
+
+
     trim_side::Union{Int,Nothing} = nothing
     trim_side2::Union{Int,Nothing} = nothing
 
-    # Summary
+
+
     summary::Bool = false
     summary_format::Symbol = :txt # :txt, :json, :html
 
-    # Matching Strategy
+
+
     matching_algorithm::Symbol = :semiglobal # :semiglobal, :hamming
 end
 
@@ -724,105 +729,7 @@ end
 
 
 
-function determine_filename(seq::String, config::DemuxConfig, ws::SemiGlobalWorkspace)
-    n = ncodeunits(seq)
 
-    # --- Pass 1: Barcode 1 ---
-    ref_search_range1 = resolve(config.ref_search_range, n)
-    barcode_start_range1 = resolve(config.barcode_start_range, n)
-    barcode_end_range1 = resolve(config.barcode_end_range, n)
-
-    start_j1 = max(first(ref_search_range1), first(barcode_start_range1), 1)
-    end_j1 = min(last(ref_search_range1), last(barcode_end_range1), n)
-    max_start_pos1 = last(barcode_start_range1)
-    min_end_pos1 = first(barcode_end_range1)
-
-    if start_j1 > end_j1 || start_j1 > max_start_pos1 || end_j1 < min_end_pos1
-        return "unknown.fastq", -1, -1
-    end
-
-    ref_search_range1 = start_j1:end_j1
-
-    min_score_bc1, score1, delta1, best_start1, best_end1 = find_best_matching_bc(seq, config.bc_seqs, config.bc_lengths_no_N, config, ws, ref_search_range1, max_start_pos1, min_end_pos1, config.trim_side)
-
-    if min_score_bc1 == 0
-        return "unknown.fastq", -1, -1
-    elseif delta1 < config.min_delta
-        return "ambiguous_classification.fastq", -1, -1
-    end
-
-    # --- Pass 2: Barcode 2 (if dual) ---
-    if config.is_dual
-
-        ref_search_range2 = resolve(config.ref_search_range2, n)
-        barcode_start_range2 = resolve(config.barcode_start_range2, n)
-        barcode_end_range2 = resolve(config.barcode_end_range2, n)
-
-        start_j2 = max(first(ref_search_range2), first(barcode_start_range2), 1)
-        end_j2 = min(last(ref_search_range2), last(barcode_end_range2), n)
-        max_start_pos2 = last(barcode_start_range2)
-        min_end_pos2 = first(barcode_end_range2)
-
-        if start_j2 > end_j2 || start_j2 > max_start_pos2 || end_j2 < min_end_pos2
-            return "unknown.fastq", -1, -1
-        end
-
-        ref_search_range2 = start_j2:end_j2
-
-        min_score_bc2, score2, delta2, best_start2, best_end2 = find_best_matching_bc(seq, config.bc_seqs2, config.bc_lengths_no_N2, config, ws, ref_search_range2, max_start_pos2, min_end_pos2, config.trim_side2)
-
-        if min_score_bc2 == 0
-            return "unknown.fastq", -1, -1
-        elseif delta2 < config.min_delta
-            return "ambiguous_classification.fastq", -1, -1
-        end
-
-        # Combine IDs
-        output_filename = string(config.ids[min_score_bc1]) * "." * string(config.ids2[min_score_bc2]) * ".fastq"
-    else
-        # Single mode
-        output_filename = string(config.ids[min_score_bc1]) * ".fastq"
-    end
-
-    trim_range = -1:-1
-
-    # Calculate trim range for BC1
-    trim_range1 = -1:-1
-    if !isnothing(config.trim_side)
-        if config.trim_side == 3
-            safe_start = max(1, best_start1)
-            trim_range1 = 1:(safe_start-1)
-        elseif config.trim_side == 5
-            trim_range1 = (best_end1+1):n
-        end
-    end
-
-    # Calculate trim range for BC2 (if dual)
-    trim_range2 = -1:-1
-    if config.is_dual && !isnothing(config.trim_side2)
-        if config.trim_side2 == 3
-            safe_start2 = max(1, best_start2)
-            trim_range2 = 1:(safe_start2-1)
-        elseif config.trim_side2 == 5
-            trim_range2 = (best_end2+1):n
-        end
-    end
-
-    # Combine trim ranges
-    if first(trim_range1) != -1 && first(trim_range2) != -1
-        trim_range = intersect(trim_range1, trim_range2)
-    elseif first(trim_range1) != -1
-        trim_range = trim_range1
-    elseif first(trim_range2) != -1
-        trim_range = trim_range2
-    end
-
-    if config.gzip_output
-        return output_filename * ".gz", first(trim_range), last(trim_range)
-    else
-        return output_filename, first(trim_range), last(trim_range)
-    end
-end
 
 
 
@@ -857,4 +764,242 @@ function DemuxStats()
         Dict{Int,Int}(), Dict{Int,Int}(), Dict{Float64,Int}(), Dict{Int,Dict{Float64,Int}}(), Dict{Int,Dict{Int,Int}}(), Dict{Int,Dict{Int,Int}}(),
         Dict{Int,Int}(), Dict{Int,Int}(), Dict{Float64,Int}(), Dict{Int,Dict{Float64,Int}}(), Dict{Int,Dict{Int,Int}}(), Dict{Int,Dict{Int,Int}}()
     )
+end
+
+"""
+    match_barcode_pass(seq::String, n::Int, config::DemuxConfig, ws::SemiGlobalWorkspace, is_pass2::Bool, stats::Union{DemuxStats,Nothing}=nothing)
+
+Helper function to run a single barcode matching pass.
+Returns `(status, barcode_index, start_pos, end_pos)`.
+Status can be: `:match`, `:unknown`, `:ambiguous`.
+"""
+function match_barcode_pass(seq::String, n::Int, config::DemuxConfig, ws::SemiGlobalWorkspace, is_pass2::Bool, stats::Union{DemuxStats,Nothing}=nothing)
+    # Select ranges and params based on pass
+    if !is_pass2
+        ref_sr = config.ref_search_range
+        bc_start_sr = config.barcode_start_range
+        bc_end_sr = config.barcode_end_range
+        bc_seqs = config.bc_seqs
+        bc_lens = config.bc_lengths_no_N
+        trim_side = config.trim_side
+    else
+        ref_sr = config.ref_search_range2
+        bc_start_sr = config.barcode_start_range2
+        bc_end_sr = config.barcode_end_range2
+        bc_seqs = config.bc_seqs2
+        bc_lens = config.bc_lengths_no_N2
+        trim_side = config.trim_side2
+    end
+
+    # Resolve dynamic ranges
+    r_search = resolve(ref_sr, n)
+    b_start = resolve(bc_start_sr, n)
+    b_end = resolve(bc_end_sr, n)
+
+    start_j = max(first(r_search), first(b_start), 1)
+    end_j = min(last(r_search), last(b_end), n)
+    max_start_pos = last(b_start)
+    min_end_pos = first(b_end)
+
+    # Sanity check ranges
+    if start_j > end_j || start_j > max_start_pos || end_j < min_end_pos
+        return :unknown, 0, -1, -1
+    end
+
+    final_search_range = start_j:end_j
+
+    # Find best match
+    need_tb = !isnothing(trim_side) || !isnothing(stats)
+
+    min_bc, score, delta, s, e = find_best_matching_bc(
+        seq, bc_seqs, bc_lens, config, ws,
+        final_search_range, max_start_pos, min_end_pos,
+        trim_side, need_tb
+    )
+
+    if min_bc == 0
+        return :unknown, 0, -1, -1
+    elseif delta < config.min_delta
+        return :ambiguous, 0, -1, -1
+    end
+
+    # Update stats if provided
+    if !isnothing(stats)
+        if !is_pass2
+            # BC1 stats
+            stats.bc1_pos_counts[s] = get(stats.bc1_pos_counts, s, 0) + 1
+
+            len = e - s + 1
+            stats.bc1_len_counts[len] = get(stats.bc1_len_counts, len, 0) + 1
+
+            r_score = round(score, digits=2)
+            stats.bc1_score_counts[r_score] = get(stats.bc1_score_counts, r_score, 0) + 1
+
+            d_s = get!(() -> Dict{Float64,Int}(), stats.bc1_per_bc_score_counts, min_bc)
+            d_s[r_score] = get(d_s, r_score, 0) + 1
+
+            d_p = get!(() -> Dict{Int,Int}(), stats.bc1_per_bc_pos_counts, min_bc)
+            d_p[s] = get(d_p, s, 0) + 1
+
+            d_l = get!(() -> Dict{Int,Int}(), stats.bc1_per_bc_len_counts, min_bc)
+            d_l[len] = get(d_l, len, 0) + 1
+        else
+            # BC2 stats
+            stats.bc2_pos_counts[s] = get(stats.bc2_pos_counts, s, 0) + 1
+
+            len = e - s + 1
+            stats.bc2_len_counts[len] = get(stats.bc2_len_counts, len, 0) + 1
+
+            r_score = round(score, digits=2)
+            stats.bc2_score_counts[r_score] = get(stats.bc2_score_counts, r_score, 0) + 1
+
+            d_s = get!(() -> Dict{Float64,Int}(), stats.bc2_per_bc_score_counts, min_bc)
+            d_s[r_score] = get(d_s, r_score, 0) + 1
+
+            d_p = get!(() -> Dict{Int,Int}(), stats.bc2_per_bc_pos_counts, min_bc)
+            d_p[s] = get(d_p, s, 0) + 1
+
+            d_l = get!(() -> Dict{Int,Int}(), stats.bc2_per_bc_len_counts, min_bc)
+            d_l[len] = get(d_l, len, 0) + 1
+        end
+    end
+
+    return :match, min_bc, s, e
+end
+
+
+function determine_filename(seq::String, config::DemuxConfig, ws::SemiGlobalWorkspace)
+    n = ncodeunits(seq)
+
+    # --- Pass 1: Barcode 1 ---
+    status1, bc1_idx, start1, end1 = match_barcode_pass(seq, n, config, ws, false, nothing)
+
+    suffix = config.gzip_output ? ".fastq.gz" : ".fastq"
+
+    if status1 == :unknown
+        return "unknown" * suffix, -1, -1
+    elseif status1 == :ambiguous
+        return "ambiguous_classification" * suffix, -1, -1
+    end
+
+    # --- Pass 2: Barcode 2 (if dual) ---
+    bc2_idx = 0
+    if config.is_dual
+        status2, idx, start2, end2 = match_barcode_pass(seq, n, config, ws, true, nothing)
+
+        if status2 == :unknown
+            return "unknown" * suffix, -1, -1
+        elseif status2 == :ambiguous
+            return "ambiguous_classification" * suffix, -1, -1
+        end
+        bc2_idx = idx
+
+        output_filename = string(config.ids[bc1_idx]) * "." * string(config.ids2[bc2_idx]) * suffix
+    else
+        output_filename = string(config.ids[bc1_idx]) * suffix
+    end
+
+    # Calculate trim range for BC1
+    trim_start = -1
+    trim_end = -1
+
+    # We want the KEEP range.
+    keep_start = 1
+    keep_end = n
+
+    if !isnothing(config.trim_side)
+        if config.trim_side == 3
+            # Keep 1 to start-1
+            # But safe_start = max(1, start1)
+            keep_end = max(1, start1) - 1
+        elseif config.trim_side == 5
+            # Keep end1+1 to n
+            keep_start = end1 + 1
+        end
+    end
+
+    if config.is_dual && !isnothing(config.trim_side2)
+        if config.trim_side2 == 3
+            # Trim everything after start2
+            keep_end = min(keep_end, max(1, start2) - 1)
+        elseif config.trim_side2 == 5
+            # Trim everything before end2
+            keep_start = max(keep_start, end2 + 1)
+        end
+    end
+
+    # Check validity
+    if keep_start > keep_end
+        # Should result in empty string (represented as 1:0 for internal logic if needed, but here returns 1, 0)
+        return output_filename, 1, 0
+    end
+
+    return output_filename, keep_start, keep_end
+end
+
+function determine_filename_and_stats(seq::String, config::DemuxConfig, ws::SemiGlobalWorkspace, stats::DemuxStats)
+    n = ncodeunits(seq)
+    stats.total_reads += 1
+
+    # --- Pass 1: Barcode 1 ---
+    status1, bc1_idx, start1, end1 = match_barcode_pass(seq, n, config, ws, false, stats)
+
+    suffix = config.gzip_output ? ".fastq.gz" : ".fastq"
+
+    if status1 == :unknown
+        stats.unmatched_reads += 1
+        return "unknown" * suffix, -1, -1
+    elseif status1 == :ambiguous
+        stats.ambiguous_reads += 1
+        return "ambiguous_classification" * suffix, -1, -1
+    end
+
+    # --- Pass 2: Barcode 2 (if dual) ---
+    bc2_idx = 0
+    if config.is_dual
+        status2, idx, start2, end2 = match_barcode_pass(seq, n, config, ws, true, stats)
+
+        if status2 == :unknown
+            stats.unmatched_reads += 1
+            return "unknown" * suffix, -1, -1
+        elseif status2 == :ambiguous
+            stats.ambiguous_reads += 1
+            return "ambiguous_classification" * suffix, -1, -1
+        end
+        bc2_idx = idx
+        output_filename = string(config.ids[bc1_idx]) * "." * string(config.ids2[bc2_idx]) * suffix
+    else
+        output_filename = string(config.ids[bc1_idx]) * suffix
+    end
+
+    # Update Match Counts
+    stats.matched_reads += 1
+    key = (bc1_idx, bc2_idx)
+    stats.sample_counts[key] = get(stats.sample_counts, key, 0) + 1
+
+    # Calculate trim range (Same deduplicated logic)
+    keep_start = 1
+    keep_end = n
+
+    if !isnothing(config.trim_side)
+        if config.trim_side == 3
+            keep_end = max(1, start1) - 1
+        elseif config.trim_side == 5
+            keep_start = end1 + 1
+        end
+    end
+
+    if config.is_dual && !isnothing(config.trim_side2)
+        if config.trim_side2 == 3
+            keep_end = min(keep_end, max(1, start2) - 1)
+        elseif config.trim_side2 == 5
+            keep_start = max(keep_start, end2 + 1)
+        end
+    end
+
+    if keep_start > keep_end
+        return output_filename, 1, 0
+    end
+
+    return output_filename, keep_start, keep_end
 end

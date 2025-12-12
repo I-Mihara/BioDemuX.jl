@@ -74,7 +74,7 @@ When using two FASTQ files, sequences in the `FASTQ_file2` are classified based 
 ID  Full_seq	Full_annotation
 001-barcode ACAGACUACAAA XXXBBBBBBBXX
 ```
-* In the `Full_seq` column, the region specified as `B` in the `Full_annotation` column is considerd as the barcode.
+* In the `Full_seq` column, the region specified as `B` in the `Full_annotation` column is considered as the barcode.
 
 * Alternatively, a FASTA file of barcode sequences can be used as the reference. In this case, each sequence in the FASTA file is treated as a full barcode (the entire sequence is considered the barcode region) and the header line of each entry (without the `>` prefix) is used as its `ID`.
 
@@ -83,7 +83,7 @@ ID  Full_seq	Full_annotation
 * All output files will be saved in the specified `output_directory`.
 * The output is gzipped depending on the input FASTQ format, or can be specified using the `gzip_output` option.
 * The names of the output files are based on the filename of the FASTQ file as the prefix and the `ID` values in the barcode reference file. For example, if the FASTQ filename is `sample.fastq` and the reference file contains IDs such as `001` and `002`, the resulting output files will be named `sample.001.fastq`, `sample.002.fastq`, and so on. You can freely change the prefix by specifying the `output_prefix` argument.
-* Sequences that do not match any barcode in the reference file are saved in `unknown.fastq`. Sequences that have ambiguous classification (i.e., they match multiple barcodes with similar scores) are saved in `ambiguous_classification.fastq`. These FASTQ files also have prefix like `sample.unknown.fastq` and `sample.ambiguous_classification.fastq`
+* Sequences that do not match any barcode in the reference file are saved in `unknown.fastq`. Sequences that have ambiguous classification (i.e., they match multiple barcodes with similar scores) are saved in `ambiguous_classification.fastq`. These FASTQ files also have prefix like `sample.unknown.fastq` and `sample.ambiguous_classification.fastq`.
 * If the `output_directory` does not exist, a new directory is created to store the output files.
 
 ## Tips to Speed Up Demultiplexing
@@ -210,7 +210,7 @@ execute_demultiplexing(FASTQ_file, barcode_file, output_directory; barcode_file2
   - Specifies trimming for the second barcode in dual-barcode mode. Options are the same as `trim_side`.
 
 - **`log::Bool`** (default: `false`):
-  - If set to `true`, basic logging information (start configuration and end duration) is printed to the standard error (`stderr`). Progress updates during execution are not displayed.
+  - If set to `true`, basic logging information (start configuration and end duration) is printed to the standard error (`stderr`). 
 
 ## Example: How Barcode Length and Option Values Affect Classification
 
@@ -226,7 +226,7 @@ We assume the case where barcode length is 10, `max_error_rate ` is 0.2, `min_de
   - **`mismatch = 1`**: Each mismatch in the sequence alignment contributes a penalty of 1.
   - **`indel = 2`**: Each insertion or deletion (indel) contributes a penalty of 2, making indels more costly than mismatches.
 
-With this settings, the classification works as follows:
+With these settings, the classification works as follows:
 1. **Allowed Error**:
    - Since the maximum allowed penalty score is 2 (`0.2 * 10`):
      - The sequence can have **up to 2 mismatches** (since each mismatch has a penalty of 1).

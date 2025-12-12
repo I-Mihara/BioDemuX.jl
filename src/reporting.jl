@@ -195,9 +195,7 @@ function write_json_report(stats::DemuxStats, config::DemuxConfig, output_dir::S
     output_file = joinpath(output_dir, "summary.json")
 
     if isfile(output_file)
-        # Append mode: Read existing, parse (manually if needed, but here we assume structure), and append
-        # Since we don't want to depend on JSON.jl, we'll do simple string manipulation.
-        # If it starts with '[', it's a list. If '{', it's a single object.
+        # Append mode: Read existing, parse (simplistic), and append
         existing_content = read(output_file, String)
         existing_content = strip(existing_content)
 
@@ -205,7 +203,7 @@ function write_json_report(stats::DemuxStats, config::DemuxConfig, output_dir::S
             # Already a list, remove closing ']' and append
             new_content = existing_content[1:end-1] * ", " * json_str * "]"
         else
-            # Single object, convert to list
+            # Single object (legacy), convert to list
             new_content = "[" * existing_content * ", " * json_str * "]"
         end
 
@@ -213,14 +211,9 @@ function write_json_report(stats::DemuxStats, config::DemuxConfig, output_dir::S
             write(io, new_content)
         end
     else
-        # New file: Write as a list containing one object for consistency? 
-        # Or write as single object and convert later?
-        # The user approved "list of objects". So let's write as a list even for the first one?
-        # Or maybe keep single object for backward compatibility if only one run?
-        # The prompt said "When appending... root structure will change".
-        # So first run = single object. Second run = list of objects.
+        # New file: Initialize as a list containing one object for consistency
         open(output_file, "w") do io
-            write(io, json_str)
+            write(io, "[" * json_str * "]")
         end
     end
 end
@@ -292,67 +285,11 @@ end
 function write_html_report(stats::DemuxStats, config::DemuxConfig, output_dir::String, fastq_path::String, bc_path::String, fastq_path2::Union{String,Nothing}=nothing, bc_path2::Union{String,Nothing}=nothing; bc_complement::Bool=false, bc_rev::Bool=false, trim_side::Union{Int,Nothing}=nothing, trim_side2::Union{Int,Nothing}=nothing, n_threads::Union{Int,Nothing}=nothing, duration::Union{Dates.Period,Nothing}=nothing)
     # Rich HTML report with CSS/SVG
 
-    # Helper to generate SVG bar chart
-    function generate_histogram(data::Dict{T,Int}, title::String, x_label::String) where T
-        if isempty(data)
-            return "<p>No data for $title</p>"
-        end
+    # Helper to generate SVG bar chart (moved to top level)
 
-        sorted_keys = sort(collect(keys(data)))
-        values = [data[k] for k in sorted_keys]
-        max_val = maximum(values)
 
-        # SVG dimensions
-        width = 600
-        height = 300
-        margin_left = 60
-        margin_bottom = 60
-        bar_width = (width - margin_left) / length(values) * 0.8
-
-        # Color palette for bars (gradient-like)
-        bar_color = "#3498db"
-
-        svg = """<div class="chart-container"><h3>$title</h3><svg width="$width" height="$height" viewBox="0 0 $width $height">"""
-
-        # Grid lines
-        for i in 0:5
-            y = height - margin_bottom - (i / 5) * (height - margin_bottom - 20)
-            svg *= """<line x1="$margin_left" y1="$y" x2="$width" y2="$y" stroke="#eee" stroke-width="1" />"""
-            # Y-axis labels
-            label_val = round(Int, (i / 5) * max_val)
-            svg *= """<text x="$(margin_left - 10)" y="$(y + 5)" font-size="10" text-anchor="end" fill="#7f8c8d">$label_val</text>"""
-        end
-
-        # Y-axis title
-        svg *= """<text transform="rotate(-90)" x="$(-(height - margin_bottom)/2)" y="15" font-size="12" text-anchor="middle" fill="#2c3e50" font-weight="bold">Read Count</text>"""
-
-        # Y-axis line
-        svg *= """<line x1="$margin_left" y1="0" x2="$margin_left" y2="$(height - margin_bottom)" stroke="#ccc" />"""
-        # X-axis line
-        svg *= """<line x1="$margin_left" y1="$(height - margin_bottom)" x2="$width" y2="$(height - margin_bottom)" stroke="#ccc" />"""
-
-        for (i, val) in enumerate(values)
-            bar_height = (val / max_val) * (height - margin_bottom - 20)
-            x = margin_left + (i - 1) * ((width - margin_left) / length(values)) + ((width - margin_left) / length(values) - bar_width) / 2
-            y = height - margin_bottom - bar_height
-
-            # Bar with hover effect (using simple title for now, CSS hover can be added)
-            svg *= """<rect x="$x" y="$y" width="$bar_width" height="$bar_height" fill="$bar_color" class="bar"><title>$(sorted_keys[i]): $val</title></rect>"""
-
-            # X-axis label
-            if length(values) <= 20 || i % (div(length(values), 20) + 1) == 0
-                label_x = x + bar_width / 2
-                label_y = height - margin_bottom + 15
-                svg *= """<text x="$label_x" y="$label_y" font-size="10" text-anchor="middle" fill="#7f8c8d">$(sorted_keys[i])</text>"""
-            end
-        end
-
-        # X-axis title
-        svg *= """<text x="$(width/2 + margin_left/2)" y="$(height - 10)" font-size="12" text-anchor="middle" fill="#2c3e50" font-weight="bold">$x_label</text>"""
-
-        svg *= "</svg></div>"
-        return svg
-    end
+    # Generate unique Run ID once
+    run_id = string(Dates.now().instant.periods.value)
 
     # Build Parameter List
     param_list_html = """
@@ -473,11 +410,11 @@ function write_html_report(stats::DemuxStats, config::DemuxConfig, output_dir::S
             <h2>Detailed Distributions</h2>
             
             <div class="tabs">
-                <div class="tab active" onclick="openTab(event, 'Global_$(Dates.now().instant.periods.value)')">Global Stats</div>
-                <div class="tab" onclick="openTab(event, 'PerBarcode_$(Dates.now().instant.periods.value)')">Per-Barcode Stats</div>
+                <div class="tab active" onclick="openTab(event, 'Global_$run_id')">Global Stats</div>
+                <div class="tab" onclick="openTab(event, 'PerBarcode_$run_id')">Per-Barcode Stats</div>
             </div>
             
-            <div id="Global_$(Dates.now().instant.periods.value)" class="tab-content active">
+            <div id="Global_$run_id" class="tab-content active">
                 <h3>Global Stats</h3>
                 <div class="summary-grid">
                     <div class="chart-container" style="grid-column: span 3;">
@@ -512,10 +449,10 @@ function write_html_report(stats::DemuxStats, config::DemuxConfig, output_dir::S
     report_body *= """
             </div>
             
-            <div id="PerBarcode_$(Dates.now().instant.periods.value)" class="tab-content">
+            <div id="PerBarcode_$run_id" class="tab-content">
                 <div style="margin-bottom: 20px;">
-                    <label for="barcode-select-$(Dates.now().instant.periods.value)" style="font-weight: 600; margin-right: 10px; color: #24292f;">Select Barcode:</label>
-                    <select id="barcode-select-$(Dates.now().instant.periods.value)" onchange="showBarcodeStats(this, '$(Dates.now().instant.periods.value)')">
+                    <label for="barcode-select-$run_id" style="font-weight: 600; margin-right: 10px; color: #24292f;">Select Barcode:</label>
+                    <select id="barcode-select-$run_id" onchange="showBarcodeStats(this, '$run_id')">
                         <option value="">-- Select a Barcode --</option>
     """
 
@@ -539,7 +476,7 @@ function write_html_report(stats::DemuxStats, config::DemuxConfig, output_dir::S
         len_data = get(stats.bc1_per_bc_len_counts, bc1_idx, Dict{Int,Int}())
 
         report_body *= """
-            <div id="stats-bc1_$bc1_idx-$(Dates.now().instant.periods.value)" class="barcode-stats-$(Dates.now().instant.periods.value)" style="display: none;">
+            <div id="stats-bc1_$bc1_idx-$run_id" class="barcode-stats-$run_id" style="display: none;">
                 <h3>Stats for $bc_name</h3>
                 <div class="summary-grid">
                     <div class="chart-container" style="margin-top: 10px; min-width: 0;">
@@ -559,8 +496,8 @@ function write_html_report(stats::DemuxStats, config::DemuxConfig, output_dir::S
     if config.is_dual
         report_body *= """
         <div style="margin-top: 40px; margin-bottom: 20px;">
-           <label for="barcode2-select-$(Dates.now().instant.periods.value)" style="font-weight: 600; margin-right: 10px; color: #24292f;">Select Barcode 2:</label>
-           <select id="barcode2-select-$(Dates.now().instant.periods.value)" onchange="showBarcodeStats(this, '$(Dates.now().instant.periods.value)')">
+           <label for="barcode2-select-$run_id" style="font-weight: 600; margin-right: 10px; color: #24292f;">Select Barcode 2:</label>
+           <select id="barcode2-select-$run_id" onchange="showBarcodeStats(this, '$run_id')">
                <option value="">-- Select a Barcode 2 --</option>
         """
         unique_bc2s = sort(unique([x[2] for x in keys(stats.sample_counts) if x[2] > 0]))
@@ -577,7 +514,7 @@ function write_html_report(stats::DemuxStats, config::DemuxConfig, output_dir::S
             len_data = get(stats.bc2_per_bc_len_counts, bc2_idx, Dict{Int,Int}())
 
             report_body *= """
-                <div id="stats-bc2_$bc2_idx-$(Dates.now().instant.periods.value)" class="barcode-stats-$(Dates.now().instant.periods.value)" style="display: none;">
+                <div id="stats-bc2_$bc2_idx-$run_id" class="barcode-stats-$run_id" style="display: none;">
                     <h3>Stats for $bc_name (Barcode 2)</h3>
                     <div class="summary-grid">
                         <div class="chart-container" style="margin-top: 10px; min-width: 0;">
@@ -606,137 +543,23 @@ function write_html_report(stats::DemuxStats, config::DemuxConfig, output_dir::S
     if isfile(output_file)
         # Append mode
         existing_content = read(output_file, String)
-        # Insert before closing body tag
-        # We need to make sure we don't duplicate headers or scripts if they are static.
-        # But our script is simple.
-        # To support multiple runs, we need unique IDs for tabs and selects.
-        # I added timestamp/ID to IDs above.
 
-        # We also need to update the script to handle dynamic IDs or be generic.
-        # The script functions openTab and showBarcodeStats need to be generic.
-        # I'll update the script in the header to be generic.
-
-        # Insert before </body>
-        new_content = replace(existing_content, "</body>" => report_body * "\n</body>")
+        wrapped_body = """
+        <div class="container" style="margin-top: 40px;">
+        $report_body
+        </div>
+        """
+        new_content = replace(existing_content, "</body>" => wrapped_body * "\n</body>")
 
         open(output_file, "w") do io
             write(io, new_content)
         end
     else
         # New file mode
-        html_header = """
-        <!DOCTYPE html>
-        <html>
-        <head>
-            <title>BioDemuX Report</title>
-            <style>
-                body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background-color: #f0f2f5; color: #1a1a1a; margin: 0; padding: 40px; }
-                .container { max_width: 1200px; margin: 0 auto; background: white; padding: 40px; border-radius: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.05); }
-                h1 { color: #1a1a1a; border-bottom: 2px solid #f0f2f5; padding-bottom: 20px; margin-bottom: 30px; font-weight: 700; letter-spacing: -0.5px; }
-                h2 { color: #2c3e50; margin-top: 40px; font-weight: 600; font-size: 1.5em; }
-                h3 { color: #57606a; font-size: 1em; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; }
-                
-                .summary-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 24px; margin-bottom: 40px; }
-                .summary-card { background: white; padding: 24px; border-radius: 12px; border: 1px solid #e1e4e8; box-shadow: 0 2px 8px rgba(0,0,0,0.02); transition: transform 0.2s; }
-                .summary-card:hover { transform: translateY(-2px); box-shadow: 0 4px 12px rgba(0,0,0,0.05); }
-                .summary-card h3 { margin: 0 0 12px 0; font-size: 0.85em; color: #6e7781; }
-                .summary-card .value { font-size: 2.5em; font-weight: 700; color: #1a1a1a; line-height: 1; margin-bottom: 8px; }
-                .summary-card .percentage { font-size: 1em; color: #57606a; font-weight: 500; }
-                
-                table { border-collapse: separate; border-spacing: 0; width: 100%; margin-top: 20px; border-radius: 8px; overflow: hidden; border: 1px solid #e1e4e8; }
-                th, td { padding: 16px 20px; text-align: left; border-bottom: 1px solid #e1e4e8; }
-                th { background-color: #f6f8fa; font-weight: 600; color: #24292f; font-size: 0.9em; text-transform: uppercase; letter-spacing: 0.5px; }
-                tr:last-child td { border-bottom: none; }
-                tr:hover td { background-color: #f8f9fa; }
-                
-                .progress-bar-container { width: 100%; background-color: #e1e4e8; border-radius: 100px; height: 8px; position: relative; overflow: hidden; }
-                .progress-bar { height: 100%; background-color: #3498db; border-radius: 100px; }
-                .progress-label { display: none; } /* Hide label inside bar, show count in table cell */
-                
-                .chart-container { margin-top: 24px; padding: 24px; background: white; border: 1px solid #e1e4e8; border-radius: 12px; overflow-x: auto; }
-                .bar:hover { opacity: 0.8; cursor: pointer; }
-                
-                .run-info { background: #f8f9fa; padding: 20px; border-radius: 8px; margin-bottom: 30px; border: 1px solid #e1e4e8; }
-                .run-info h3 { margin-top: 0; color: #2c3e50; }
-                .run-info ul { list-style: none; padding: 0; margin: 0; }
-                .run-info li { margin-bottom: 8px; font-size: 0.95em; color: #57606a; }
-                .run-info li strong { color: #24292f; font-weight: 600; margin-right: 8px; }
-
-                .tabs { display: flex; border-bottom: 1px solid #e1e4e8; margin-top: 40px; gap: 8px; }
-                .tab { padding: 12px 24px; cursor: pointer; background: transparent; border: none; border-bottom: 2px solid transparent; font-weight: 500; color: #57606a; transition: all 0.2s; }
-                .tab:hover { color: #24292f; }
-                .tab.active { border-bottom: 2px solid #3498db; color: #3498db; font-weight: 600; }
-                .tab-content { display: none; padding: 30px 0; animation: fadeIn 0.3s ease; }
-                .tab-content.active { display: block; }
-                
-                @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
-
-                select { padding: 8px 12px; border: 1px solid #e1e4e8; border-radius: 6px; font-size: 14px; color: #24292f; background-color: white; min-width: 200px; }
-            </style>
-            <script>
-                function openTab(evt, tabName) {
-                    // Find the parent container of the tabs to scope the search?
-                    // Or just use unique IDs. I used unique IDs.
-                    
-                    // We need to handle multiple tab groups on one page.
-                    // The 'tabName' is unique (e.g., Global_12345).
-                    // But we need to close other tabs in the SAME group.
-                    // How to identify the group?
-                    // The tab buttons are siblings.
-                    
-                    var tabButton = evt.currentTarget;
-                    var tabContainer = tabButton.parentElement;
-                    var allTabs = tabContainer.getElementsByClassName("tab");
-                    
-                    // Remove active from all tabs in this container
-                    for (var i = 0; i < allTabs.length; i++) {
-                        allTabs[i].classList.remove("active");
-                    }
-                    
-                    // Add active to clicked tab
-                    tabButton.classList.add("active");
-                    
-                    // Hide all tab contents that correspond to this group
-                    // This is tricky. We can infer the group ID from the tabName.
-                    // tabName format: Name_ID
-                    var parts = tabName.split("_");
-                    var id = parts[parts.length-1];
-                    
-                    // Hide Global_ID and PerBarcode_ID
-                    document.getElementById("Global_" + id).style.display = "none";
-                    document.getElementById("PerBarcode_" + id).style.display = "none";
-                    document.getElementById("Global_" + id).classList.remove("active");
-                    document.getElementById("PerBarcode_" + id).classList.remove("active");
-                    
-                    // Show selected
-                    document.getElementById(tabName).style.display = "block";
-                    document.getElementById(tabName).classList.add("active");
-                }
-
-                function showBarcodeStats(select, runId) {
-                    var bcId = select.value;
-                    // Hide all stats in this run
-                    var statsDivs = document.getElementsByClassName("barcode-stats-" + runId);
-                    for (var i = 0; i < statsDivs.length; i++) {
-                        statsDivs[i].style.display = "none";
-                    }
-                    if (bcId) {
-                        document.getElementById("stats-" + bcId + "-" + runId).style.display = "block";
-                    }
-                }
-            </script>
-        </head>
-        <body>
-            <div class="container">
-                <h1>BioDemuX Report</h1>
-                $report_body
-            </div>
-        </body>
-        </html>
-        """
-
         open(output_file, "w") do io
-            write(io, html_header)
+            write(io, HTML_REPORT_TEMPLATE_START)
+            write(io, report_body)
+            write(io, HTML_REPORT_TEMPLATE_END)
         end
     end
 end
@@ -750,154 +573,5 @@ function generate_summary_report(stats::DemuxStats, config::DemuxConfig, output_
         write_stdout_report(stats, config, fastq_path, bc_path, fastq_path2, bc_path2; bc_complement=bc_complement, bc_rev=bc_rev, trim_side=trim_side, trim_side2=trim_side2, n_threads=n_threads, duration=duration)
     else
         write_text_report(stats, config, output_dir, fastq_path, bc_path, fastq_path2, bc_path2; bc_complement=bc_complement, bc_rev=bc_rev, trim_side=trim_side, trim_side2=trim_side2, n_threads=n_threads, duration=duration)
-    end
-end
-
-function determine_filename_and_stats(seq::String, config::DemuxConfig, ws::SemiGlobalWorkspace, stats::DemuxStats)
-    n = ncodeunits(seq)
-    stats.total_reads += 1
-
-    # --- Pass 1: Barcode 1 ---
-    ref_search_range1 = resolve(config.ref_search_range, n)
-    barcode_start_range1 = resolve(config.barcode_start_range, n)
-    barcode_end_range1 = resolve(config.barcode_end_range, n)
-
-    start_j1 = max(first(ref_search_range1), first(barcode_start_range1), 1)
-    end_j1 = min(last(ref_search_range1), last(barcode_end_range1), n)
-    max_start_pos1 = last(barcode_start_range1)
-    min_end_pos1 = first(barcode_end_range1)
-
-    if start_j1 > end_j1 || start_j1 > max_start_pos1 || end_j1 < min_end_pos1
-        stats.unmatched_reads += 1
-        return "unknown.fastq", -1, -1
-    end
-
-    ref_search_range1 = start_j1:end_j1
-
-    min_score_bc1, score1, delta1, best_start1, best_end1 = find_best_matching_bc(seq, config.bc_seqs, config.bc_lengths_no_N, config, ws, ref_search_range1, max_start_pos1, min_end_pos1, config.trim_side, true)
-
-    if min_score_bc1 == 0
-        stats.unmatched_reads += 1
-        return "unknown.fastq", -1, -1
-    elseif delta1 < config.min_delta
-        stats.ambiguous_reads += 1
-        return "ambiguous_classification.fastq", -1, -1
-    end
-
-    # --- Pass 2: Barcode 2 (if dual) ---
-    min_score_bc2 = 0
-    score2 = 0.0
-    best_start2 = -1
-    best_end2 = -1
-
-    if config.is_dual
-
-        ref_search_range2 = resolve(config.ref_search_range2, n)
-        barcode_start_range2 = resolve(config.barcode_start_range2, n)
-        barcode_end_range2 = resolve(config.barcode_end_range2, n)
-
-        start_j2 = max(first(ref_search_range2), first(barcode_start_range2), 1)
-        end_j2 = min(last(ref_search_range2), last(barcode_end_range2), n)
-        max_start_pos2 = last(barcode_start_range2)
-        min_end_pos2 = first(barcode_end_range2)
-
-        if start_j2 > end_j2 || start_j2 > max_start_pos2 || end_j2 < min_end_pos2
-            stats.unmatched_reads += 1
-            return "unknown.fastq", -1, -1
-        end
-
-        ref_search_range2 = start_j2:end_j2
-
-        min_score_bc2, score2, delta2, best_start2, best_end2 = find_best_matching_bc(seq, config.bc_seqs2, config.bc_lengths_no_N2, config, ws, ref_search_range2, max_start_pos2, min_end_pos2, config.trim_side2, true)
-
-        if min_score_bc2 == 0
-            stats.unmatched_reads += 1
-            return "unknown.fastq", -1, -1
-        elseif delta2 < config.min_delta
-            stats.ambiguous_reads += 1
-            return "ambiguous_classification.fastq", -1, -1
-        end
-
-        # Combine IDs
-        output_filename = string(config.ids[min_score_bc1]) * "." * string(config.ids2[min_score_bc2]) * ".fastq"
-    else
-        # Single mode
-        output_filename = string(config.ids[min_score_bc1]) * ".fastq"
-    end
-
-    # If we reached here, it's a match
-    stats.matched_reads += 1
-
-    # Update stats
-    key = (min_score_bc1, min_score_bc2)
-    stats.sample_counts[key] = get(stats.sample_counts, key, 0) + 1
-
-    stats.bc1_pos_counts[best_start1] = get(stats.bc1_pos_counts, best_start1, 0) + 1
-    len1 = best_end1 - best_start1 + 1
-    stats.bc1_len_counts[len1] = get(stats.bc1_len_counts, len1, 0) + 1
-    stats.bc1_score_counts[score1] = get(stats.bc1_score_counts, score1, 0) + 1
-
-    if !haskey(stats.bc1_per_bc_score_counts, min_score_bc1)
-        stats.bc1_per_bc_score_counts[min_score_bc1] = Dict{Float64,Int}()
-        stats.bc1_per_bc_pos_counts[min_score_bc1] = Dict{Int,Int}()
-        stats.bc1_per_bc_len_counts[min_score_bc1] = Dict{Int,Int}()
-    end
-    stats.bc1_per_bc_score_counts[min_score_bc1][score1] = get(stats.bc1_per_bc_score_counts[min_score_bc1], score1, 0) + 1
-    stats.bc1_per_bc_pos_counts[min_score_bc1][best_start1] = get(stats.bc1_per_bc_pos_counts[min_score_bc1], best_start1, 0) + 1
-    stats.bc1_per_bc_len_counts[min_score_bc1][len1] = get(stats.bc1_per_bc_len_counts[min_score_bc1], len1, 0) + 1
-
-    if config.is_dual
-        stats.bc2_pos_counts[best_start2] = get(stats.bc2_pos_counts, best_start2, 0) + 1
-        len2 = best_end2 - best_start2 + 1
-        stats.bc2_len_counts[len2] = get(stats.bc2_len_counts, len2, 0) + 1
-        stats.bc2_score_counts[score2] = get(stats.bc2_score_counts, score2, 0) + 1
-
-        if !haskey(stats.bc2_per_bc_score_counts, min_score_bc2)
-            stats.bc2_per_bc_score_counts[min_score_bc2] = Dict{Float64,Int}()
-            stats.bc2_per_bc_pos_counts[min_score_bc2] = Dict{Int,Int}()
-            stats.bc2_per_bc_len_counts[min_score_bc2] = Dict{Int,Int}()
-        end
-        stats.bc2_per_bc_score_counts[min_score_bc2][score2] = get(stats.bc2_per_bc_score_counts[min_score_bc2], score2, 0) + 1
-        stats.bc2_per_bc_pos_counts[min_score_bc2][best_start2] = get(stats.bc2_per_bc_pos_counts[min_score_bc2], best_start2, 0) + 1
-        stats.bc2_per_bc_len_counts[min_score_bc2][len2] = get(stats.bc2_per_bc_len_counts[min_score_bc2], len2, 0) + 1
-    end
-
-    trim_range = -1:-1
-
-    # Calculate trim range for BC1
-    trim_range1 = -1:-1
-    if !isnothing(config.trim_side)
-        if config.trim_side == 3
-            safe_start = max(1, best_start1)
-            trim_range1 = 1:(safe_start-1)
-        elseif config.trim_side == 5
-            trim_range1 = (best_end1+1):n
-        end
-    end
-
-    # Calculate trim range for BC2 (if dual)
-    trim_range2 = -1:-1
-    if config.is_dual && !isnothing(config.trim_side2)
-        if config.trim_side2 == 3
-            safe_start2 = max(1, best_start2)
-            trim_range2 = 1:(safe_start2-1)
-        elseif config.trim_side2 == 5
-            trim_range2 = (best_end2+1):n
-        end
-    end
-
-    # Combine trim ranges
-    if first(trim_range1) != -1 && first(trim_range2) != -1
-        trim_range = intersect(trim_range1, trim_range2)
-    elseif first(trim_range1) != -1
-        trim_range = trim_range1
-    elseif first(trim_range2) != -1
-        trim_range = trim_range2
-    end
-
-    if config.gzip_output
-        return output_filename * ".gz", first(trim_range), last(trim_range)
-    else
-        return output_filename, first(trim_range), last(trim_range)
     end
 end
