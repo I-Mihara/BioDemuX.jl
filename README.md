@@ -1,5 +1,6 @@
 ![package_logo](BioDemuX_logo.png)
 [![Build Status](https://github.com/I-Mihara/BioDemuX.jl/actions/workflows/CI.yml/badge.svg?branch=main)](https://github.com/I-Mihara/BioDemuX.jl/actions/workflows/CI.yml?query=branch%3Amain)
+[![Build and Release](https://github.com/I-Mihara/BioDemuX.jl/actions/workflows/release.yml/badge.svg)](https://github.com/I-Mihara/BioDemuX.jl/actions/workflows/release.yml)
 [![DOI](https://img.shields.io/badge/DOI-10.24433%2FCO.5417078.v2-blue)](https://doi.org/10.24433/CO.5417078.v2)
 [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.14191427.svg)](https://doi.org/10.5281/zenodo.14191427)
 
@@ -85,6 +86,66 @@ ID  Full_seq	Full_annotation
 * The names of the output files are based on the filename of the FASTQ file as the prefix and the `ID` values in the barcode reference file. For example, if the FASTQ filename is `sample.fastq` and the reference file contains IDs such as `001` and `002`, the resulting output files will be named `sample.001.fastq`, `sample.002.fastq`, and so on. You can freely change the prefix by specifying the `output_prefix` argument.
 * Sequences that do not match any barcode in the reference file are saved in `unknown.fastq`. Sequences that have ambiguous classification (i.e., they match multiple barcodes with similar scores) are saved in `ambiguous_classification.fastq`. These FASTQ files also have prefix like `sample.unknown.fastq` and `sample.ambiguous_classification.fastq`.
 * If the `output_directory` does not exist, a new directory is created to store the output files.
+
+## CLI Usage (Standalone Executable)
+
+BioDemuX can also be used as a standalone command-line tool without installing Julia explicitly, or by building it from source.
+
+### 1. Download Pre-built Binary
+Go to the **[Releases](https://github.com/I-Mihara/BioDemuX.jl/releases)** page and download the executable for your OS (Windows, macOS, or Linux).
+
+### 2. Build from Source
+If you want to build the executable yourself:
+```bash
+git clone https://github.com/I-Mihara/BioDemuX.jl.git
+cd BioDemuX.jl
+julia --project=. create_app.jl
+```
+This creates the executable at `biodemux/bin/biodemux` (or `BioDemuX` on some systems).
+
+### 3. Running the Tool
+> [!NOTE]
+> Julia apps may have a short startup delay (~0.5-1s) compared to C/Rust tools. To minimize this impact when processing many files, use **Directory Mode** (see below).
+
+#### Directory Mode (Recommended for Speed)
+Pass a **directory path** instead of a single file to process all FASTQ files inside it efficiently (single startup).
+
+**Single-end:**
+```bash
+./biodemux fastq_dir/ barcodes.csv output_dir
+```
+
+**Paired-end:**
+```bash
+./biodemux R1_dir/ barcodes.csv output_dir --fastq2 R2_dir/
+```
+*Note: Files in `R1_dir` and `R2_dir` are sorted alphabetically and matched 1-to-1. Please ensure file counts and order match.*
+
+#### Parallel Execution
+To enable multi-threading, set the environment variable `JULIA_NUM_THREADS` before running.
+```bash
+export JULIA_NUM_THREADS=auto  # Uses all available cores
+./biodemux ...
+```
+
+#### Full Options
+You can pass any of the configuration options as command-line arguments. Use `--help` to see the full list.
+
+**Example with options:**
+```bash
+./biodemux input.fastq barcodes.csv output_dir \
+    --max-error-rate 0.2 \
+    --mismatch 1 \
+    --summary \
+    --gzip-output
+```
+*Note: Boolean flags like `--summary` do not require a value. Keyword arguments like `max_error_rate` require a value after the flag.*
+
+```bash
+./biodemux --help
+```
+
+
 
 ## Tips to Speed Up Demultiplexing
 

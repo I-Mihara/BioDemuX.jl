@@ -30,5 +30,8 @@ include("fileio.jl")
 include("templates.jl")
 include("reporting.jl")
 include("core.jl")
+include("cli.jl")
+
+export julia_main
 
 end#module
