@@ -1,325 +1,58 @@
 ![package_logo](BioDemuX_logo.png)
+
 [![Build Status](https://github.com/I-Mihara/BioDemuX.jl/actions/workflows/CI.yml/badge.svg?branch=main)](https://github.com/I-Mihara/BioDemuX.jl/actions/workflows/CI.yml?query=branch%3Amain)
 [![Build and Release](https://github.com/I-Mihara/BioDemuX.jl/actions/workflows/release.yml/badge.svg)](https://github.com/I-Mihara/BioDemuX.jl/actions/workflows/release.yml)
+[![Docs](https://img.shields.io/badge/docs-stable-blue.svg)](https://I-Mihara.github.io/BioDemuX.jl/)
 [![DOI](https://img.shields.io/badge/DOI-10.24433%2FCO.5417078.v2-blue)](https://doi.org/10.24433/CO.5417078.v2)
 [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.14191427.svg)](https://doi.org/10.5281/zenodo.14191427)
 
-## Overview
-BioDemuX.jl is a Julia package designed for demultiplexing reads based on barcodes. Given a set of sequencing reads in FASTQ format and a reference barcode in CSV or TSV format, each read is assigned to a FASTQ file corresponding to its barcode. This barcode assignment process is designed to be robust to barcode mutations and allows you to adjust the permitted level of mutation through parameters.
+# BioDemuX.jl
 
-![conceptual_diagram](conceptual_diagram.png)
+**BioDemuX.jl** is a high-performance Julia package for demultiplexing sequencing reads with robust barcode mutation handling. It is designed to be the definitive tool for accurate and efficient barcode assignment.
 
-### Package features
-* Fast and accurate semi-global alignment
-* Robust to barcode mutations
-* No restrictions on barcode size or position
-* Usable as julia package
-* Supports parallel computing
+## 🚀 Key Features
 
-### References
-To be published.
+*   **⚡ Ultra-Fast Semi-Global Alignment**:
+    *   The core engine is built on highly optimized semi-global alignment. It delivers **unrivaled speed** while robustly handling **insertions, deletions (indels)**, and mismatches—recovering reads that standard Hamming-based tools discard.
 
-## Table of Contents
-- [Dependencies](#dependencies)
-- [Installation](#installation)
-- [Basic Usage](#basic-usage)
-  - [Input](#input)
-  - [Output](#output)
-- [Tips to Speed Up Demultiplexing](#tips-to-speed-up-demultiplexing)
-- [Options](#options)
-- [Example: How Barcode Length and Option Values Affect Classification](#example-how-barcode-length-and-option-values-affect-classification)
-- [How to run tests](#how-to-run-tests)
-- [Dataset](#dataset)
-- [Support or Contact](#support-or-contact)
+*   **🔧 Extensive Flexibility**:
+    *   **Precise Targeting**: Define custom search ranges to focus on specific regions.
+    *   Supports **Dual Barcoding** and variable-length barcodes.
+    *   **Adapter Trimming**: Support for simultaneous adapter matching and trimming.
+    *   **Multi-Mode Matching**: Choose between `:semiglobal` for robustness, or `:hamming`/`:exact` for speed.
 
+*   **🚀 High-Performance Architecture**:
+    *   Multi-threaded & Channel-based streaming.
+    *   Efficient memory usage via streaming I/O.
 
-## Dependencies
-- **Julia** >= 1.10 (includes the `Distributed` standard library)
-- **Julia packages**
-  - DataFrames >= 1.7.0
-  - CSV >= 0.10.14
-  - CodecZlib >= 0.7.0
-  - BufferedStreams >= 1.2.2
+*   **📊 Visualize Analysis**:
+    *   Optional interactive **HTML reports** for distribution and score analysis.
 
-## Installation
-1. Open the Julia REPL (by typing `julia` in the terminal).
-2. Press `]` to enter the Pkg REPL mode.
-3. Run the following command to install `BioDemuX.jl`:
-    ```julia
-    add BioDemuX
-    ```
-4. Press the `Backspace` key to exit the Pkg mode.
+*   **💻 Zero-Dependency CLI**:
+    *   Available as a standalone binary for Linux, macOS, and Windows. No Julia installation required to run in production pipelines.
 
-## Basic Usage
+## 📚 Documentation
 
-The primary function of this package is `execute_demultiplexing()`. It classifies sequences in a FASTQ file by aligning them with reference barcodes in barcode file. Usage is as follows:
-```Julia
+**[Full Documentation](https://I-Mihara.github.io/BioDemuX.jl/)**
+
+Visit our documentation for comprehensive guides, API references, and detailed usage examples.
+
+## 📦 Installation
+```julia
+using Pkg; Pkg.add("BioDemuX")
+```
+
+## 🏃 Quick Start
+
+```julia
 using BioDemuX
-execute_demultiplexing(FASTQ_file, barcode_file, output_directory)
+execute_demultiplexing("reads.fastq", "barcodes.csv", "output_dir")
 ```
 
-### Input
-
-#### FASTQ File
-* There is no restriction on the sequence length in the FASTQ file.
-* The input can be gzipped; the function automatically detects and processes the files accordingly.
-* The function can take one or two FASTQ files as input. In the case of using two FASTQ files, the command can be executed as follows:
-```julia
-execute_demultiplexing(FASTQ_file1, FASTQ_file2, barcode_file, output_directory)
-```
-When using two FASTQ files, sequences in the `FASTQ_file2` are classified based on the alignment of the `FASTQ_file1` sequences with the barcodes in the barcode reference file. Hence, the corresponding reads in both FASTQ files must be in the same order and present in equal numbers.
-
-#### Barcode Reference File
-* The reference file is expected to be a CSV or TSV file containing the following columns: `ID`, `Full_seq`, `Full_annotation`, as shown below:
-```
-ID  Full_seq	Full_annotation
-001-barcode ACAGACUACAAA XXXBBBBBBBXX
-```
-* In the `Full_seq` column, the region specified as `B` in the `Full_annotation` column is considered as the barcode.
-
-* Alternatively, a FASTA file of barcode sequences can be used as the reference. In this case, each sequence in the FASTA file is treated as a full barcode (the entire sequence is considered the barcode region) and the header line of each entry (without the `>` prefix) is used as its `ID`.
-
-### Output
-
-* All output files will be saved in the specified `output_directory`.
-* The output is gzipped depending on the input FASTQ format, or can be specified using the `gzip_output` option.
-* The names of the output files are based on the filename of the FASTQ file as the prefix and the `ID` values in the barcode reference file. For example, if the FASTQ filename is `sample.fastq` and the reference file contains IDs such as `001` and `002`, the resulting output files will be named `sample.001.fastq`, `sample.002.fastq`, and so on. You can freely change the prefix by specifying the `output_prefix` argument.
-* Sequences that do not match any barcode in the reference file are saved in `unknown.fastq`. Sequences that have ambiguous classification (i.e., they match multiple barcodes with similar scores) are saved in `ambiguous_classification.fastq`. These FASTQ files also have prefix like `sample.unknown.fastq` and `sample.ambiguous_classification.fastq`.
-* If the `output_directory` does not exist, a new directory is created to store the output files.
-
-## CLI Usage (Standalone Executable)
-
-BioDemuX can also be used as a standalone command-line tool without installing Julia explicitly, or by building it from source.
-
-### 1. Download Pre-built Binary
-Go to the **[Releases](https://github.com/I-Mihara/BioDemuX.jl/releases)** page and download the executable for your OS (Windows, macOS, or Linux).
-
-### 2. Build from Source
-If you want to build the executable yourself:
+**[CLI Users]** Download the binary from [Releases](https://github.com/I-Mihara/BioDemuX.jl/releases) and run:
 ```bash
-git clone https://github.com/I-Mihara/BioDemuX.jl.git
-cd BioDemuX.jl
-julia --project=. create_app.jl
-```
-This creates the executable at `biodemux/bin/biodemux` (or `BioDemuX` on some systems).
-
-### 3. Running the Tool
-> [!NOTE]
-> Julia apps may have a short startup delay (~0.5-1s) compared to C/Rust tools. To minimize this impact when processing many files, use **Directory Mode** (see below).
-
-#### Directory Mode (Recommended for Speed)
-Pass a **directory path** instead of a single file to process all FASTQ files inside it efficiently (single startup).
-
-**Single-end:**
-```bash
-./biodemux fastq_dir/ barcodes.csv output_dir
+./biodemux reads.fastq barcodes.csv output_dir
 ```
 
-**Paired-end:**
-```bash
-./biodemux R1_dir/ barcodes.csv output_dir --fastq2 R2_dir/
-```
-*Note: Files in `R1_dir` and `R2_dir` are sorted alphabetically and matched 1-to-1. Please ensure file counts and order match.*
-
-#### Parallel Execution
-To enable multi-threading, set the environment variable `JULIA_NUM_THREADS` before running.
-```bash
-export JULIA_NUM_THREADS=auto  # Uses all available cores
-./biodemux ...
-```
-
-#### Full Options
-You can pass any of the configuration options as command-line arguments. Use `--help` to see the full list.
-
-**Example with options:**
-```bash
-./biodemux input.fastq barcodes.csv output_dir \
-    --max-error-rate 0.2 \
-    --mismatch 1 \
-    --summary \
-    --gzip-output
-```
-*Note: Boolean flags like `--summary` do not require a value. Keyword arguments like `max_error_rate` require a value after the flag.*
-
-```bash
-./biodemux --help
-```
-
-
-
-## Tips to Speed Up Demultiplexing
-
-### 1. Parallel Computing
-`BioDemuX.jl` supports parallel computing using multi-threading and channel-based streaming IO, allowing faster processing of large datasets with efficient memory usage. To utilize parallel processing, follow the steps below:
-
-#### Starting Julia with Multiple Threads
-To enable parallel processing, you need to start Julia with multiple threads. Use the `-t` (or `--threads`) flag followed by the number of desired threads:
-```bash
-./julia -t [number_of_threads]
-```
-For example, to use 8 threads:
-```bash
-./julia -t 8
-```
-You can use the `-t auto` option to automatically detect the number of available threads and start Julia with that number of threads.
-
-You can also set the `JULIA_NUM_THREADS` environment variable.
-```bash
-export JULIA_NUM_THREADS=8
-```
-
-#### Running `execute_demultiplexing` with Parallel Computing
-Once Julia is started with multiple threads, `BioDemuX.jl` automatically utilizes them for reading, writing, and processing data in parallel. No additional setup is required.
-
-### 2. Setting Options
-BioDemuX.jl skips calculation of unnecessary path in DP matrix based on the settings of `max_error_rate`,`mismatch`. and `indel`. By setting lower max error rate or higher penalty, you can further increase computation speed.
-
-## Options
-
-The `execute_demultiplexing` function provides several optional parameters to control the demultiplexing process:
-
-```julia
-execute_demultiplexing(FASTQ_file, barcode_file, output_directory; barcode_file2=nothing, output_prefix="", gzip_output=nothing, max_error_rate=0.2, min_delta=0.0, mismatch=1, indel=1, nindel=nothing, bc_complement=false, bc_rev=false, ref_search_range="1:end", barcode_start_range="1:end", barcode_end_range="1:end", ref_search_range2="1:end", barcode_start_range2="1:end", barcode_end_range2="1:end", chunk_size=4000, channel_capacity=64, matching_algorithm=:semiglobal, log=false)
-```
-
-- **`max_error_rate::Float64`** (default: `0.2`): 
-  - This is the maximum allowed error rate for matching sequences to barcodes. It is multiplied by the barcode's length to calculate the total penalty score that can be tolerated. If the sequence's alignment penalty exceeds this limit for all barcodes, it will be saved in `unknown.fastq`.
-
-- **`matching_algorithm::Symbol`** (default: `:semiglobal`):
-  - Specifies the algorithm used for barcode matching.
-    - `:semiglobal`: Uses semi-global alignment allowing for mismatches, insertions, and deletions. This is the default and most robust mode.
-    - `:hamming`: Uses Hamming distance, allowing only for mismatches (no insertions or deletions). Faster than semiglobal.
-    - `:exact`: Uses exact string matching, allowing no mismatches or indels. Fastest mode. Use only when data quality is perfect or strict filtering is desired.
-
-- **`min_delta::Float64`** (default: `0.0`): 
-  - This defines the minimum difference in penalty scores needed to confidently assign a sequence to a barcode. It is multiplied by the barcode's length to determine the score difference required to avoid ambiguity. If the difference between the best match's penalty score and the second-best match's score is less than this threshold, the sequence is considered ambiguous and saved in `ambiguous_classification.fastq`.
-  
-- **`mismatch::Int`** (default: `1`): 
-  - The penalty score for mismatches during sequence alignment. A higher value makes the alignment more strict for mismatches.
-
-- **`indel::Int`** (default: `1`): 
-  - The penalty score for insertions and deletions (indels) during sequence alignment. A higher value makes the alignment more strict for insertions or deletions.
-
-- **`nindel::Union{Int, Nothing}`** (default: `nothing`):
-  - The penalty score for insertions and deletions (indels) when the base is 'N' (wildcard). This should only be specified when using 'N' in barcodes or reads. Note that enabling this option may slow down the demultiplexing process.
-
-- **`classify_both::Bool`** (default: `false`): 
-  - If set to `true`, the function will classify sequences in both `FASTQ_file1` and `FASTQ_file2` based on the alignment with sequences in `FASTQ_file1` and output separate files for each. Otherwise, it classifies only R2 sequences by default.
-
-- **`bc_complement::Bool`** (default: `false`): 
-  - If set to true, the barcodes in the reference file are converted to their complementary sequences before alignment.
-
-- **`bc_rev::Bool`** (default: `false`):
-  - If set to true, the barcodes in the reference file are reversed before alignment.
-
-- **`output_prefix1::String`** (default: `""`):
-  - Specifies the prefix for the first set of output files when processing two FASTQ files. If not provided, the prefix defaults to the name of the `FASTQ_file1`. By setting this option, you can customize the file names for the first set of outputs.
-
-- **`output_prefix2::String`** (default: `""`):
-  - Specifies the prefix for the second set of output files when processing two FASTQ files. If not provided, the prefix defaults to the name of the `FASTQ_file2`. By setting this option, you can customize the file names for the second set of outputs.
-
-- **`output_prefix::String`** (default: `""`):
-  - Specifies the prefix for the output files when processing a single FASTQ file. If not provided, the prefix defaults to the name of the FASTQ file.
-
-- **`gzip_output::Bool`** (default: `auto-detect`):
-  - Controls whether the output FASTQ files are compressed (gzipped). By default (when this option is not explicitly set), the output will be gzipped if the input FASTQ files have a `.gz` extension, and uncompressed otherwise. You can set `gzip_output=true` to force gzipped output files or `gzip_output=false` to ensure output files are not compressed.
-
-- **`ref_search_range::String`** (default: `"1:end"`):
-  - Specifies the range within the read sequence where the barcode search should be performed. The format is `"start:end"`, where `start` and `end` can be integers (1-based index) or relative to the end of the sequence using `end` (e.g., `"1:20"`, `"end-19:end"`). This allows you to restrict the search to a specific region, improving performance and accuracy if the barcode position is known.
-
-- **`barcode_start_range::String`** (default: `"1:end"`):
-  - Specifies the allowed range for the start position of the barcode alignment within the read. The format is the same as `ref_search_range`. If the aligned barcode starts outside this range, it will not be considered a valid match.
-
-- **`barcode_end_range::String`** (default: `"1:end"`):
-  - Specifies the allowed range for the end position of the barcode alignment within the read. The format is the same as `ref_search_range`. If the aligned barcode ends outside this range, it will not be considered a valid match.
-
-- **`chunk_size::Int`** (default: `4000`):
-  - Specifies the number of reads to process in a single chunk. Larger chunk sizes can reduce overhead but increase memory usage.
-
-- **`channel_capacity::Int`** (default: `64`):
-  - Specifies the capacity of the input/output channels. The recycle channel capacity is automatically set to `2 * channel_capacity`. Increasing this value can improve throughput on systems with high memory availability.
-
-- **`barcode_file2::Union{String, Nothing}`** (default: `nothing`):
-  - Specifies the path to the second barcode reference file for dual-index demultiplexing. If provided, the function performs a two-step alignment: first against `barcode_file`, then against `barcode_file2`.
-
-- **`ref_search_range2::String`** (default: `"1:end"`):
-  - Specifies the search range for the second barcode. Format is the same as `ref_search_range`.
-
-- **`barcode_start_range2::String`** (default: `"1:end"`):
-  - Specifies the allowed start range for the second barcode. Format is the same as `barcode_start_range`.
-
-- **`barcode_end_range2::String`** (default: `"1:end"`):
-  - Specifies the allowed end range for the second barcode. Format is the same as `barcode_end_range`.
-
-- **`summary::Bool`** (default: `false`):
-  - If set to `true`, a summary report is generated after demultiplexing. The report includes statistics on total reads, matched reads, unmatched reads, ambiguous reads, and detailed distributions of alignment scores, positions, and lengths for each barcode.
-
-- **`summary_format::Symbol`** (default: `:html`):
-  - Specifies the format of the summary report. Options are:
-    - `:text`: A human-readable text file (`summary.txt`).
-    - `:html`: An interactive HTML report (`summary.html`) with tabs and dropdowns for detailed visualization.
-    - `:json`: A JSON file (`summary.json`) for programmatic parsing.
-    - `:stdout`: Prints the summary to the standard output.
-
-- **`trim_side::Union{Int, Nothing}`** (default: `nothing`):
-  - Specifies which side of the read to trim relative to the barcode.
-    - `3`: Trims the 3' side (right side) of the barcode match. Keeps the sequence *before* the barcode.
-    - `5`: Trims the 5' side (left side) of the barcode match. Keeps the sequence *after* the barcode.
-  - If `nothing`, no trimming is performed.
-
-- **`trim_side2::Union{Int, Nothing}`** (default: `nothing`):
-  - Specifies trimming for the second barcode in dual-barcode mode. Options are the same as `trim_side`.
-
-- **`log::Bool`** (default: `false`):
-  - If set to `true`, basic logging information (start configuration and end duration) is printed to the standard error (`stderr`). 
-
-## Example: How Barcode Length and Option Values Affect Classification
-
-We assume the case where barcode length is 10, `max_error_rate ` is 0.2, `min_delta` is 0.2, `mismatch` is 1, `indel` is 2.
-
-
-- **Maximum Allowed Penalty Score**:
-  - With a `max_error_rate` of 0.2 and a barcode length of 10, the maximum allowed penalty score for a sequence to still match a barcode is `0.2 * 10 = 2`.
-- **Minimum Allowed Penalty Difference**:
-  - With `min_delta = 0.2` and a barcode length of 10, the minimum required difference in scores between the best and second-best barcode matches is `0.2 * 10 = 2`.
-
-- **Penalty Settings**:
-  - **`mismatch = 1`**: Each mismatch in the sequence alignment contributes a penalty of 1.
-  - **`indel = 2`**: Each insertion or deletion (indel) contributes a penalty of 2, making indels more costly than mismatches.
-
-With these settings, the classification works as follows:
-1. **Allowed Error**:
-   - Since the maximum allowed penalty score is 2 (`0.2 * 10`):
-     - The sequence can have **up to 2 mismatches** (since each mismatch has a penalty of 1).
-     - The sequence can have **up to 1 indel** (since each indel has a penalty of 2).
-     - For example, when the sequence have a combination of 1 mismatch and 1 indel, the penalty score is `1 (mismatch) + 2 (indel) = 3`. Since this score exceeds the maximum allowed penalty score of 2, it would **not** be allowed.
-
-2. **Matching Process**:
-   - During the alignment, the sequence is compared to each barcode in the reference file. The total penalty score (based on mismatches and indels) is calculated for each alignment.
-   - If a sequence's penalty score with a barcode exceeds 2, it **cannot** be classified under that barcode.
-
-3. **Ambiguous Classification**:
-   - If a sequence matches multiple barcodes and the penalty scores of the best match and the second-best match differ by **less than 2** (the minimum allowed penalty difference), the sequence will be classified into `ambiguous_classification.fastq`.
-   - For example, if the best matching barcode has a penalty score of 1 and the second-best has a score of 2, the difference is `2 - 1 = 1`, which is **less** than the threshold of 2. Therefore, the sequence is ambiguous.
-
-4. **Unknown Classification**:
-   - If the sequence fails to match **any** barcode within the maximum allowed penalty score of 2, it is classified as `unknown.fastq`.
-
-## How to Run Tests
-To ensure that `BioDemuX.jl` functions correctly, you can run tests using the Julia package's built-in testing functionality. 
-```julia
-using Pkg
-Pkg.test("BioDemuX")
-```
-
-## Dataset
-The datasets used in the paper are publicly available.
-- **In vitro dataset and test code:**
-
-Link to the dataset and test code: https://doi.org/10.24433/CO.5417078.v1
-- **In silico dataset:**
-
-Link to the dataset: https://doi.org/10.5281/zenodo.14178228
-
-## Support or Contact
-If you encounter any issues or have requests, please provide feedback by posting a new GitHub issue on our repository. We appreciate your input and will do our best to assist you!
+## 👥 Support
+If you encounter any issues, please open an issue on [GitHub](https://github.com/I-Mihara/BioDemuX.jl/issues).
