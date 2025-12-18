@@ -4,18 +4,22 @@ authors = ["I.Mihara <issei.mihara@xforestx.com> and contributors"]
 version = "1.6.0"
 
 [deps]
+ArgParse = "c7e460c6-2fb9-53a9-8c5b-16f535851c63"
 BufferedStreams = "e1450e63-4bb3-523b-b2a4-4ffa8c0fd77d"
 CSV = "336ed68f-0bac-5ca0-87d4-7b16caf5d00b"
 CodecZlib = "944b1d66-785c-5afd-91f1-9de20f533193"
 DataFrames = "a93c6f00-e57d-5684-b7b6-d8193f3e46c0"
 Dates = "ade2ca70-3891-5945-98fb-dc099432e06a"
 Distributed = "8ba89e20-285c-5b6f-9357-94700520ee1b"
+PackageCompiler = "9b87118b-4619-50d2-8e1e-99f35a4d4d9d"
 
 [compat]
+ArgParse = "1.2.0"
 BufferedStreams = "1.2"
 CSV = "0.10"
 CodecZlib = "0.7"
 DataFrames = "1.7"
+PackageCompiler = "2.2.3"
 julia = "1.10"
 
 [extras]

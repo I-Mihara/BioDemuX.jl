@@ -2,6 +2,10 @@ using BioDemuX
 using Test
 using CodecZlib
 
+
+# Change working directory to the directory of this file (test/)
+cd(@__DIR__)
+
 include("common.jl")
 
 @testset "Unit Tests" begin
