@@ -1,0 +1,6 @@
+[deps]
+BioDemuX = "ac87d701-7792-4b86-94b3-1f30c027900b"
+Documenter = "e30172f5-a6a5-5a46-863b-614d45cd2de4"
+
+[time]
+2025-12-18 = "21:05:00"
